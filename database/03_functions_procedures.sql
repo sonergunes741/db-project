@@ -338,9 +338,9 @@ BEGIN
     SELECT 
         'FLIGHT SUMMARY' as report_section,
         COUNT(*) as total_flights,
-        SUM(CASE WHEN status = 'ARRIVED' THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status = 'DELAYED' THEN 1 ELSE 0 END) as delayed,
-        SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled,
+        SUM(CASE WHEN status = 'ARRIVED' THEN 1 ELSE 0 END) as completed_count,
+        SUM(CASE WHEN status = 'DELAYED' THEN 1 ELSE 0 END) as delayed_count,
+        SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_count,
         ROUND(AVG(delay_minutes), 1) as avg_delay_min
     FROM flights
     WHERE DATE(scheduled_departure) = p_date;
