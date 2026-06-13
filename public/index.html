@@ -3,377 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="SkyPort International Airport Database Management System - Admin Dashboard">
-    <title>SkyPort Airport DBMS</title>
+    <title>SkyPort DB — Technical Test Panel</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
 </head>
 <body>
-    <div class="app-container">
-        <!-- ============================================================ -->
-        <!-- SIDEBAR NAVIGATION -->
-        <!-- ============================================================ -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <span class="logo-icon">✈️</span>
-                <div>
-                    <h1>SkyPort DBMS</h1>
-                    <div class="subtitle">Airport Admin Panel</div>
-                </div>
-            </div>
-            <nav class="sidebar-nav">
-                <div class="nav-section">Operations</div>
-                <div class="nav-item active" data-module="flights" id="nav-flights">
-                    <span class="nav-icon">🛫</span>
-                    <span>Flight Management</span>
-                </div>
-                <div class="nav-item" data-module="passengers" id="nav-passengers">
-                    <span class="nav-icon">👤</span>
-                    <span>Passengers & Bookings</span>
-                </div>
-                <div class="nav-item" data-module="baggage" id="nav-baggage">
-                    <span class="nav-icon">🧳</span>
-                    <span>Baggage & Cargo</span>
-                </div>
-                <div class="nav-item" data-module="employees" id="nav-employees">
-                    <span class="nav-icon">👷</span>
-                    <span>Employee Management</span>
-                </div>
+<div class="app">
+    <div class="sidebar">
+        <h2>⚙ DB Test Panel</h2>
 
-                <div class="nav-section">Infrastructure</div>
-                <div class="nav-item" data-module="operations" id="nav-operations">
-                    <span class="nav-icon">🏗️</span>
-                    <span>Airport Operations</span>
-                </div>
-                <div class="nav-item" data-module="commercial" id="nav-commercial">
-                    <span class="nav-icon">🛍️</span>
-                    <span>Commercial & Parking</span>
-                </div>
+        <div class="section-title">— Tables & Data</div>
+        <button onclick="showPanel('tables')" class="active">Tables Overview</button>
+        <button onclick="showPanel('raw')">Raw Table Viewer</button>
 
-                <div class="nav-section">System</div>
-                <div class="nav-item" data-module="admin" id="nav-admin">
-                    <span class="nav-icon">⚙️</span>
-                    <span>Admin Panel</span>
-                </div>
-            </nav>
-        </aside>
+        <div class="section-title">— Triggers (12)</div>
+        <button onclick="showPanel('triggers')">Test Triggers</button>
 
-        <!-- ============================================================ -->
-        <!-- MAIN CONTENT AREA -->
-        <!-- ============================================================ -->
-        <div class="main-content">
-            <div class="top-bar">
-                <h2 id="page-title">🛫 Flight Management</h2>
-                <div class="db-status">
-                    <span class="dot" id="db-status-dot"></span>
-                    <span id="db-status-text">Connected to skyport_airport</span>
+        <div class="section-title">— Functions (6)</div>
+        <button onclick="showPanel('functions')">Test Functions</button>
+
+        <div class="section-title">— Procedures (6)</div>
+        <button onclick="showPanel('procedures')">Test Procedures</button>
+
+        <div class="section-title">— Views (11)</div>
+        <button onclick="showPanel('views')">Test Views</button>
+
+        <div class="section-title">— Transactions</div>
+        <button onclick="showPanel('transactions')">Atomic Transactions</button>
+
+        <div class="section-title">— Joins & Queries</div>
+        <button onclick="showPanel('joins')">Outer Joins</button>
+        <button onclick="showPanel('advanced')">Advanced Queries</button>
+
+        <div class="section-title">— System</div>
+        <button onclick="showPanel('sql')">SQL Console</button>
+        <button onclick="showPanel('audit')">Audit Log</button>
+    </div>
+
+    <div class="main">
+        <div class="topbar">
+            <span style="color:#e94560;font-weight:700">SKYPORT AIRPORT DB — TEST PANEL</span>
+            <span class="db-info">MySQL: <span id="db-status" class="ok">checking...</span></span>
+        </div>
+
+        <div class="content">
+            <div id="log-box" class="log-area"></div>
+
+            <!-- TABLES OVERVIEW -->
+            <div class="panel active" id="panel-tables">
+                <div class="panel-title">📋 DATABASE TABLES OVERVIEW</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="runShow('tables')">SHOW ALL TABLES</button>
+                    <button class="act-btn" onclick="runShow('triggers')">SHOW ALL TRIGGERS</button>
+                    <button class="act-btn" onclick="runShow('functions')">SHOW ALL FUNCTIONS</button>
+                    <button class="act-btn" onclick="runShow('procedures')">SHOW ALL PROCEDURES</button>
+                    <button class="act-btn" onclick="runShow('views')">SHOW ALL VIEWS</button>
                 </div>
+                <div id="tables-result"></div>
             </div>
 
-            <div class="content-area">
-                <!-- ============================================================ -->
-                <!-- MODULE 1: FLIGHTS -->
-                <!-- ============================================================ -->
-                <div class="module-panel active" id="module-flights">
-                    <div class="stats-grid" id="flight-stats"></div>
+            <!-- RAW TABLE VIEWER -->
+            <div class="panel" id="panel-raw">
+                <div class="panel-title">🔍 RAW TABLE VIEWER — Select a table to see its data</div>
+                <div class="actions" id="raw-table-buttons"></div>
+                <div id="raw-result"></div>
+            </div>
 
-                    <div class="shortcuts-bar">
-                        <span class="shortcut-label">⚡ Quick Actions</span>
-                        <button class="btn-shortcut" onclick="shortcutUpdateFlightStatus(1, 'BOARDING')">Board TK1</button>
-                        <button class="btn-shortcut green" onclick="shortcutUpdateFlightStatus(1, 'DEPARTED')">Depart TK1</button>
-                        <button class="btn-shortcut orange" onclick="shortcutUpdateFlightStatus(5, 'DELAYED', 30, 'ATC restrictions')">Delay LH401</button>
-                        <button class="btn-shortcut red" onclick="shortcutUpdateFlightStatus(9, 'CANCELLED', 0, 'Aircraft technical issue')">Cancel AF501</button>
-                        <button class="btn-shortcut purple" onclick="shortcutUpdateFlightStatus(1, 'ARRIVED')">Land TK1</button>
-                        <button class="btn-shortcut" onclick="loadFlightHistory(1)">TK1 History</button>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>📋 Flight Dashboard</h3>
-                            <div class="btn-group">
-                                <button class="btn btn-primary btn-sm" onclick="openModal('add-flight')">+ Add Flight</button>
-                                <button class="btn btn-outline btn-sm" onclick="loadFlights()">🔄 Refresh</button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <table class="data-table" id="flights-table">
-                                <thead>
-                                    <tr>
-                                        <th>Flight</th>
-                                        <th>Airline</th>
-                                        <th>Route</th>
-                                        <th>Departure</th>
-                                        <th>Aircraft</th>
-                                        <th>Gate</th>
-                                        <th>Occupancy</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="flights-tbody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div id="flight-history-panel"></div>
+            <!-- TRIGGERS -->
+            <div class="panel" id="panel-triggers">
+                <div class="panel-title">⚡ TRIGGER TESTS — Click to fire each trigger and see results</div>
+                <div class="actions">
+                    <button class="act-btn green" onclick="testTrigger('booking_insert')">1. trg_after_booking_insert<br><small>Auto boarding pass</small></button>
+                    <button class="act-btn" onclick="testTrigger('flight_status')">2. trg_after_flight_status_update<br><small>Status history log</small></button>
+                    <button class="act-btn red" onclick="testTrigger('baggage_weight')">3. trg_before_baggage_insert<br><small>Weight limit check</small></button>
+                    <button class="act-btn" onclick="testTrigger('baggage_claim')">4. trg_after_baggage_claim<br><small>Auto status update</small></button>
+                    <button class="act-btn red" onclick="testTrigger('employee_delete')">5. trg_before_employee_delete<br><small>Prevent active crew delete</small></button>
+                    <button class="act-btn" onclick="testTrigger('maintenance_insert')">6. trg_after_maintenance_insert<br><small>Aircraft → MAINTENANCE</small></button>
+                    <button class="act-btn" onclick="testTrigger('maintenance_complete')">7. trg_after_maintenance_complete<br><small>Aircraft → ACTIVE</small></button>
+                    <button class="act-btn green" onclick="testTrigger('shop_transaction')">8. trg_after_shop_transaction<br><small>Award FF miles</small></button>
+                    <button class="act-btn red" onclick="testTrigger('gate_conflict')">9. trg_before_gate_assignment<br><small>Gate conflict check</small></button>
+                    <button class="act-btn" onclick="testTrigger('audit_booking')">10. trg_audit_booking_insert<br><small>Audit log entry</small></button>
+                    <button class="act-btn" onclick="testTrigger('parking')">11. trg_after_parking_reservation<br><small>Update parking spots</small></button>
+                    <button class="act-btn red" onclick="testTrigger('flight_delete')">12. trg_before_flight_delete<br><small>Prevent delete w/ bookings</small></button>
                 </div>
+                <div id="triggers-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 2: PASSENGERS & BOOKINGS -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-passengers">
-                    <div class="stats-grid" id="passenger-stats"></div>
-
-                    <div class="shortcuts-bar">
-                        <span class="shortcut-label">⚡ Quick Actions</span>
-                        <button class="btn-shortcut green" onclick="shortcutBookFlight(9, 1, 'ECONOMY', '26E')">Book Chen→TK1</button>
-                        <button class="btn-shortcut" onclick="shortcutCheckIn(1)">Check-in Booking#1</button>
-                        <button class="btn-shortcut red" onclick="shortcutCancelBooking(8)">Cancel Booking#8</button>
-                        <button class="btn-shortcut purple" onclick="shortcutTransfer(13, 18, '15A')">Transfer Booking#13</button>
-                        <button class="btn-shortcut orange" onclick="loadPassengerItinerary(3)">Ahmet Itinerary</button>
-                    </div>
-
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchPassengerTab('passengers')">Passengers</div>
-                        <div class="tab" onclick="switchPassengerTab('bookings')">Bookings</div>
-                        <div class="tab" onclick="switchPassengerTab('itinerary')">Itinerary</div>
-                        <div class="tab" onclick="switchPassengerTab('frequent')">Frequent Flyer</div>
-                    </div>
-
-                    <div id="passengers-content">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>👤 Passengers</h3>
-                                <div class="btn-group">
-                                    <input type="text" class="form-control" placeholder="Search passengers..." id="passenger-search" style="width:250px" oninput="searchPassengers(this.value)">
-                                    <button class="btn btn-primary btn-sm" onclick="openModal('add-passenger')">+ Add Passenger</button>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>ID</th><th>Name</th><th>Email</th><th>Passport</th><th>Nationality</th><th>Phone</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="passengers-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="bookings-content" style="display:none">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3>📝 Bookings</h3>
-                                <button class="btn btn-outline btn-sm" onclick="loadBookings()">🔄 Refresh</button>
-                            </div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>ID</th><th>Ref</th><th>Passenger</th><th>Flight</th><th>Route</th><th>Class</th><th>Seat</th><th>Price</th><th>Status</th><th>Payment</th><th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="bookings-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="itinerary-content" style="display:none"></div>
-                    <div id="frequent-content" style="display:none"></div>
+            <!-- FUNCTIONS -->
+            <div class="panel" id="panel-functions">
+                <div class="panel-title">🔧 FUNCTION TESTS — Execute each function and see return values</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="testFunction('duration')">fn_calculate_flight_duration(1)</button>
+                    <button class="act-btn" onclick="testFunction('miles')">fn_get_passenger_miles(1)</button>
+                    <button class="act-btn" onclick="testFunction('utilization')">fn_aircraft_utilization_rate(1, 30)</button>
+                    <button class="act-btn" onclick="testFunction('gate_occ')">fn_gate_occupancy_rate(1, CURDATE())</button>
+                    <button class="act-btn" onclick="testFunction('flight_occ')">fn_flight_occupancy(1)</button>
+                    <button class="act-btn" onclick="testFunction('revenue')">fn_get_airline_revenue(1, ...)</button>
                 </div>
+                <div id="functions-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 3: BAGGAGE & CARGO -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-baggage">
-                    <div class="shortcuts-bar">
-                        <span class="shortcut-label">⚡ Quick Actions</span>
-                        <button class="btn-shortcut" onclick="shortcutAddBaggage(1)">Add Bag→Booking#1</button>
-                        <button class="btn-shortcut green" onclick="shortcutUpdateBaggage(1, 'LOADED')">Load Bag#1</button>
-                        <button class="btn-shortcut orange" onclick="shortcutUpdateBaggage(1, 'ARRIVED')">Arrive Bag#1</button>
-                        <button class="btn-shortcut red" onclick="shortcutFileClaim(1, 1, 'LOST')">File Lost Claim</button>
-                    </div>
-
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchBaggageTab('tracking')">Baggage Tracking</div>
-                        <div class="tab" onclick="switchBaggageTab('cargo')">Cargo Shipments</div>
-                    </div>
-                    <div id="baggage-tracking-content">
-                        <div class="card">
-                            <div class="card-header"><h3>🧳 Baggage Tracking</h3></div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr><th>ID</th><th>Tag</th><th>Passenger</th><th>Flight</th><th>Route</th><th>Weight</th><th>Type</th><th>Status</th><th>Claim</th></tr>
-                                    </thead>
-                                    <tbody id="baggage-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="cargo-content" style="display:none">
-                        <div class="card">
-                            <div class="card-header"><h3>📦 Cargo Shipments</h3></div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr><th>ID</th><th>Flight</th><th>Route</th><th>Shipper</th><th>Receiver</th><th>Type</th><th>Weight</th><th>Price</th><th>Status</th></tr>
-                                    </thead>
-                                    <tbody id="cargo-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+            <!-- PROCEDURES -->
+            <div class="panel" id="panel-procedures">
+                <div class="panel-title">⚙️ STORED PROCEDURE TESTS — Call procedures with test data</div>
+                <div class="actions">
+                    <button class="act-btn green" onclick="testProcedure('book')">CALL sp_book_flight</button>
+                    <button class="act-btn red" onclick="testProcedure('cancel')">CALL sp_cancel_booking</button>
+                    <button class="act-btn" onclick="testProcedure('checkin')">CALL sp_check_in_passenger</button>
+                    <button class="act-btn purple" onclick="testProcedure('transfer')">CALL sp_transfer_passenger</button>
+                    <button class="act-btn" onclick="testProcedure('gate')">CALL sp_reassign_gate</button>
+                    <button class="act-btn yellow" onclick="testProcedure('report')">CALL sp_generate_daily_report</button>
                 </div>
+                <div id="procedures-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 4: EMPLOYEES -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-employees">
-                    <div class="stats-grid" id="employee-stats"></div>
-
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchEmployeeTab('directory')">Employee Directory</div>
-                        <div class="tab" onclick="switchEmployeeTab('crew')">Crew Schedule</div>
-                    </div>
-
-                    <div id="employee-directory-content">
-                        <div class="card">
-                            <div class="card-header"><h3>👷 Employee Directory (Inheritance View)</h3></div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr><th>ID</th><th>Name</th><th>Type</th><th>Email</th><th>Airline</th><th>Hire Date</th><th>Salary</th><th>Specialization</th><th>Active</th></tr>
-                                    </thead>
-                                    <tbody id="employees-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="crew-schedule-content" style="display:none"></div>
+            <!-- VIEWS -->
+            <div class="panel" id="panel-views">
+                <div class="panel-title">👁 VIEW TESTS — Query each view</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="testView('vw_flight_dashboard')">vw_flight_dashboard</button>
+                    <button class="act-btn" onclick="testView('vw_passenger_itinerary')">vw_passenger_itinerary</button>
+                    <button class="act-btn" onclick="testView('vw_airline_statistics')">vw_airline_statistics</button>
+                    <button class="act-btn" onclick="testView('vw_gate_availability')">vw_gate_availability</button>
+                    <button class="act-btn" onclick="testView('vw_baggage_tracking')">vw_baggage_tracking</button>
+                    <button class="act-btn" onclick="testView('vw_crew_schedule')">vw_crew_schedule</button>
+                    <button class="act-btn" onclick="testView('vw_maintenance_status')">vw_maintenance_status</button>
+                    <button class="act-btn" onclick="testView('vw_revenue_report')">vw_revenue_report</button>
+                    <button class="act-btn" onclick="testView('vw_delayed_flights')">vw_delayed_flights</button>
+                    <button class="act-btn" onclick="testView('vw_employee_directory')">vw_employee_directory</button>
+                    <button class="act-btn" onclick="testView('vw_parking_availability')">vw_parking_availability</button>
                 </div>
+                <div id="views-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 5: AIRPORT OPERATIONS -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-operations">
-                    <div class="shortcuts-bar">
-                        <span class="shortcut-label">⚡ Quick Actions</span>
-                        <button class="btn-shortcut" onclick="shortcutReassignGate(1, 5)">Reassign TK1→A5</button>
-                    </div>
-
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchOpsTab('gates')">Gates</div>
-                        <div class="tab" onclick="switchOpsTab('terminals')">Terminals</div>
-                        <div class="tab" onclick="switchOpsTab('runways')">Runways</div>
-                        <div class="tab" onclick="switchOpsTab('maintenance')">Maintenance</div>
-                        <div class="tab" onclick="switchOpsTab('aircraft')">Fleet</div>
-                        <div class="tab" onclick="switchOpsTab('airline-stats')">Airline Stats</div>
-                    </div>
-
-                    <div id="ops-gates-content">
-                        <div class="card">
-                            <div class="card-header"><h3>🚪 Gate Availability</h3></div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead><tr><th>Gate</th><th>Terminal</th><th>Type</th><th>Available</th><th>Flight</th><th>Destination</th><th>Time Window</th></tr></thead>
-                                    <tbody id="gates-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="ops-terminals-content" style="display:none"></div>
-                    <div id="ops-runways-content" style="display:none"></div>
-                    <div id="ops-maintenance-content" style="display:none"></div>
-                    <div id="ops-aircraft-content" style="display:none"></div>
-                    <div id="ops-airline-stats-content" style="display:none"></div>
+            <!-- TRANSACTIONS -->
+            <div class="panel" id="panel-transactions">
+                <div class="panel-title">🔒 ATOMIC TRANSACTION TESTS — Verify commit/rollback behavior</div>
+                <div class="actions">
+                    <button class="act-btn green" onclick="testTransaction('book_success')">Book Flight (SUCCESS → COMMIT)</button>
+                    <button class="act-btn red" onclick="testTransaction('book_fail')">Book Full Flight (FAIL → ROLLBACK)</button>
+                    <button class="act-btn green" onclick="testTransaction('cancel_success')">Cancel Booking (SUCCESS)</button>
+                    <button class="act-btn red" onclick="testTransaction('cancel_fail')">Cancel Already Cancelled (FAIL)</button>
+                    <button class="act-btn" onclick="testTransaction('show_state')">Show Current State (flights.available_seats)</button>
                 </div>
+                <div id="transactions-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 6: COMMERCIAL & PARKING -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-commercial">
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchCommTab('shops')">Shops</div>
-                        <div class="tab" onclick="switchCommTab('transactions')">Transactions</div>
-                        <div class="tab" onclick="switchCommTab('parking')">Parking</div>
-                    </div>
-
-                    <div id="comm-shops-content">
-                        <div class="card">
-                            <div class="card-header"><h3>🛍️ Airport Shops</h3></div>
-                            <div class="card-body">
-                                <table class="data-table">
-                                    <thead><tr><th>Name</th><th>Type</th><th>Terminal</th><th>Floor</th><th>Hours</th><th>Rent</th><th>Active</th></tr></thead>
-                                    <tbody id="shops-tbody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="comm-transactions-content" style="display:none"></div>
-                    <div id="comm-parking-content" style="display:none"></div>
+            <!-- JOINS -->
+            <div class="panel" id="panel-joins">
+                <div class="panel-title">🔗 OUTER JOIN TESTS</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="testJoin('left')">LEFT OUTER JOIN<br><small>Flights with/without gates</small></button>
+                    <button class="act-btn" onclick="testJoin('right')">RIGHT OUTER JOIN<br><small>Gates with/without flights</small></button>
+                    <button class="act-btn purple" onclick="testJoin('full')">FULL OUTER JOIN (Emulated)<br><small>Employees ↔ Flights</small></button>
                 </div>
+                <div id="joins-result"></div>
+            </div>
 
-                <!-- ============================================================ -->
-                <!-- MODULE 7: ADMIN PANEL -->
-                <!-- ============================================================ -->
-                <div class="module-panel" id="module-admin">
-                    <div class="stats-grid" id="admin-stats"></div>
-
-                    <div class="tabs">
-                        <div class="tab active" onclick="switchAdminTab('sql')">SQL Console</div>
-                        <div class="tab" onclick="switchAdminTab('audit')">Audit Log</div>
-                        <div class="tab" onclick="switchAdminTab('dbinfo')">DB Info</div>
-                    </div>
-
-                    <div id="admin-sql-content">
-                        <div class="shortcuts-bar">
-                            <span class="shortcut-label">📝 Query Templates</span>
-                            <button class="btn-shortcut" onclick="sqlTemplate('dashboard')">Flight Dashboard</button>
-                            <button class="btn-shortcut" onclick="sqlTemplate('stats')">Airline Stats</button>
-                            <button class="btn-shortcut green" onclick="sqlTemplate('revenue')">Revenue Report</button>
-                            <button class="btn-shortcut purple" onclick="sqlTemplate('delayed')">Delayed Flights</button>
-                            <button class="btn-shortcut orange" onclick="sqlTemplate('leftjoin')">LEFT JOIN</button>
-                            <button class="btn-shortcut" onclick="sqlTemplate('rightjoin')">RIGHT JOIN</button>
-                            <button class="btn-shortcut red" onclick="sqlTemplate('fulljoin')">FULL JOIN</button>
-                            <button class="btn-shortcut purple" onclick="sqlTemplate('functions')">Use Functions</button>
-                            <button class="btn-shortcut green" onclick="sqlTemplate('window')">Window Funcs</button>
-                            <button class="btn-shortcut orange" onclick="sqlTemplate('cte')">CTE Query</button>
-                        </div>
-                        <div class="sql-console">
-                            <textarea id="sql-input" placeholder="Enter SQL query... (SELECT, CALL, SHOW, DESCRIBE)"></textarea>
-                            <div class="sql-console-bar">
-                                <span class="hint">Ctrl+Enter to execute • SELECT queries only</span>
-                                <button class="btn btn-primary btn-sm" onclick="executeSQL()">▶ Execute</button>
-                            </div>
-                        </div>
-                        <div id="sql-result"></div>
-                    </div>
-                    <div id="admin-audit-content" style="display:none"></div>
-                    <div id="admin-dbinfo-content" style="display:none"></div>
+            <!-- ADVANCED -->
+            <div class="panel" id="panel-advanced">
+                <div class="panel-title">🧠 ADVANCED SQL QUERIES</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="testAdvanced('subquery')">Subquery</button>
+                    <button class="act-btn" onclick="testAdvanced('correlated')">Correlated Subquery</button>
+                    <button class="act-btn purple" onclick="testAdvanced('window')">Window Functions (RANK, DENSE_RANK)</button>
+                    <button class="act-btn yellow" onclick="testAdvanced('cte')">CTE (Common Table Expression)</button>
+                    <button class="act-btn" onclick="testAdvanced('exists')">EXISTS</button>
+                    <button class="act-btn" onclick="testAdvanced('selfjoin')">Self-Join (Connecting Flights)</button>
+                    <button class="act-btn green" onclick="testAdvanced('case')">CASE + GROUP BY (Revenue)</button>
                 </div>
+                <div id="advanced-result"></div>
+            </div>
+
+            <!-- SQL CONSOLE -->
+            <div class="panel" id="panel-sql">
+                <div class="panel-title">💻 SQL CONSOLE — Execute raw queries</div>
+                <textarea class="sql-textarea" id="sql-input" placeholder="SELECT * FROM airlines LIMIT 5;"></textarea>
+                <div class="actions" style="margin-top:8px">
+                    <button class="act-btn green" onclick="runSQL()">▶ EXECUTE (Ctrl+Enter)</button>
+                </div>
+                <div id="sql-result"></div>
+            </div>
+
+            <!-- AUDIT -->
+            <div class="panel" id="panel-audit">
+                <div class="panel-title">📜 AUDIT LOG — All database operations logged by triggers</div>
+                <div class="actions">
+                    <button class="act-btn" onclick="loadAudit()">REFRESH AUDIT LOG</button>
+                </div>
+                <div id="audit-result"></div>
             </div>
         </div>
     </div>
-
-    <!-- ============================================================ -->
-    <!-- MODAL -->
-    <!-- ============================================================ -->
-    <div class="modal-overlay" id="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h3 id="modal-title">Modal</h3>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modal-body"></div>
-            <div class="modal-footer" id="modal-footer"></div>
-        </div>
-    </div>
-
-    <!-- Toast container -->
-    <div class="toast-container" id="toast-container"></div>
-
-    <script src="app.js"></script>
+</div>
+<script src="app.js"></script>
 </body>
 </html>

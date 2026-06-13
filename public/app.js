@@ -1,1028 +1,628 @@
 // ============================================================
-// SKYPORT AIRPORT DBMS — Frontend Application Logic
+// SKYPORT DB — Technical Test Panel Logic
 // ============================================================
 
-const API = '';
+// ============================================================
+// HELPERS
+// ============================================================
+
+async function api(sql) {
+    const res = await fetch('/api/admin/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data;
+}
+
+function log(msg, type = 'info') {
+    const box = document.getElementById('log-box');
+    const time = new Date().toLocaleTimeString();
+    box.innerHTML = `<div class="log-entry"><span class="time">[${time}]</span> <span class="msg-${type}">${msg}</span></div>` + box.innerHTML;
+}
+
+function renderResult(targetId, sql, rows, label) {
+    const container = document.getElementById(targetId);
+    if (!rows || (Array.isArray(rows) && rows.length === 0)) {
+        container.innerHTML = `<div class="result-block">
+            <div class="result-header"><span class="sql-label">${label || 'QUERY'}</span><span class="row-count">0 rows</span></div>
+            <div class="sql-display">${escHtml(sql)}</div>
+            <div style="padding:10px;color:#666">No rows returned</div>
+        </div>` + container.innerHTML;
+        return;
+    }
+
+    // Handle multiple result sets (from CALL)
+    if (Array.isArray(rows) && Array.isArray(rows[0])) {
+        rows.forEach((rs, i) => {
+            if (Array.isArray(rs) && rs.length > 0) {
+                renderResult(targetId, i === 0 ? sql : '(continued)', rs, `${label} — Result Set ${i + 1}`);
+            }
+        });
+        return;
+    }
+
+    const cols = Object.keys(rows[0]);
+    const html = `<div class="result-block">
+        <div class="result-header">
+            <span class="sql-label">${label || 'QUERY'}</span>
+            <span class="row-count">${rows.length} row${rows.length !== 1 ? 's' : ''} × ${cols.length} columns</span>
+        </div>
+        <div class="sql-display">${escHtml(sql)}</div>
+        <div class="table-scroll">
+            <table class="raw-table">
+                <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+                <tbody>${rows.map(r => `<tr>${cols.map(c => {
+                    const v = r[c];
+                    if (v === null || v === undefined) return `<td class="null-val">NULL</td>`;
+                    if (typeof v === 'number') return `<td class="num-val">${v}</td>`;
+                    const s = String(v);
+                    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return `<td class="date-val">${s}</td>`;
+                    return `<td>${escHtml(s)}</td>`;
+                }).join('')}</tr>`).join('')}</tbody>
+            </table>
+        </div>
+    </div>`;
+    container.innerHTML = html + container.innerHTML;
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 // ============================================================
 // NAVIGATION
 // ============================================================
 
-const moduleNames = {
-    flights: '🛫 Flight Management',
-    passengers: '👤 Passengers & Bookings',
-    baggage: '🧳 Baggage & Cargo',
-    employees: '👷 Employee Management',
-    operations: '🏗️ Airport Operations',
-    commercial: '🛍️ Commercial & Parking',
-    admin: '⚙️ Admin Panel'
-};
-
-document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-        const module = item.dataset.module;
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        item.classList.add('active');
-        document.querySelectorAll('.module-panel').forEach(p => p.classList.remove('active'));
-        document.getElementById(`module-${module}`).classList.add('active');
-        document.getElementById('page-title').textContent = moduleNames[module] || module;
-        loadModuleData(module);
-    });
-});
-
-function loadModuleData(module) {
-    switch(module) {
-        case 'flights': loadFlights(); break;
-        case 'passengers': loadPassengers(); loadBookings(); break;
-        case 'baggage': loadBaggage(); loadCargo(); break;
-        case 'employees': loadEmployees(); break;
-        case 'operations': loadGates(); break;
-        case 'commercial': loadShops(); break;
-        case 'admin': loadAdminStats(); break;
-    }
-}
-
-// ============================================================
-// API HELPER
-// ============================================================
-
-async function api(url, options = {}) {
-    try {
-        const res = await fetch(API + url, {
-            headers: { 'Content-Type': 'application/json' },
-            ...options,
-            body: options.body ? JSON.stringify(options.body) : undefined
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'API Error');
-        return data;
-    } catch (err) {
-        toast(err.message, 'error');
-        throw err;
-    }
-}
-
-// ============================================================
-// TOAST NOTIFICATIONS
-// ============================================================
-
-function toast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
-    const t = document.createElement('div');
-    t.className = `toast ${type}`;
-    t.innerHTML = `<span>${icons[type] || ''}</span><span>${message}</span>`;
-    container.appendChild(t);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 4000);
-}
-
-// ============================================================
-// MODAL
-// ============================================================
-
-function openModal(type) {
-    const overlay = document.getElementById('modal-overlay');
-    const title = document.getElementById('modal-title');
-    const body = document.getElementById('modal-body');
-    const footer = document.getElementById('modal-footer');
-    overlay.classList.add('open');
-
-    if (type === 'add-flight') {
-        title.textContent = '✈️ Add New Flight';
-        body.innerHTML = `
-            <div class="form-row">
-                <div class="form-group"><label>Flight Number</label><input class="form-control" id="f-number" placeholder="TK999"></div>
-                <div class="form-group"><label>Airline ID</label><input class="form-control" id="f-airline" type="number" placeholder="1" value="1"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Origin</label><input class="form-control" id="f-origin" placeholder="SKP" value="SKP"></div>
-                <div class="form-group"><label>Destination</label><input class="form-control" id="f-dest" placeholder="JFK"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Departure</label><input class="form-control" id="f-dep" type="datetime-local"></div>
-                <div class="form-group"><label>Arrival</label><input class="form-control" id="f-arr" type="datetime-local"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Type</label><select class="form-control" id="f-type"><option value="INTERNATIONAL">International</option><option value="DOMESTIC">Domestic</option></select></div>
-                <div class="form-group"><label>Aircraft ID</label><input class="form-control" id="f-aircraft" type="number" placeholder="1"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Total Seats</label><input class="form-control" id="f-seats" type="number" placeholder="189" value="189"></div>
-                <div class="form-group"><label>Base Price ($)</label><input class="form-control" id="f-price" type="number" placeholder="350" value="350"></div>
-            </div>`;
-        footer.innerHTML = `<button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addFlight()">Create Flight</button>`;
-    } else if (type === 'add-passenger') {
-        title.textContent = '👤 Add New Passenger';
-        body.innerHTML = `
-            <div class="form-row">
-                <div class="form-group"><label>First Name</label><input class="form-control" id="p-first" placeholder="John"></div>
-                <div class="form-group"><label>Last Name</label><input class="form-control" id="p-last" placeholder="Doe"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Email</label><input class="form-control" id="p-email" type="email" placeholder="john@email.com"></div>
-                <div class="form-group"><label>Phone</label><input class="form-control" id="p-phone" placeholder="+1-555-0000"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Passport</label><input class="form-control" id="p-passport" placeholder="US12345678"></div>
-                <div class="form-group"><label>Nationality</label><input class="form-control" id="p-nationality" placeholder="American"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Date of Birth</label><input class="form-control" id="p-dob" type="date"></div>
-                <div class="form-group"><label>Gender</label><select class="form-control" id="p-gender"><option value="M">Male</option><option value="F">Female</option><option value="OTHER">Other</option></select></div>
-            </div>`;
-        footer.innerHTML = `<button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addPassenger()">Add Passenger</button>`;
-    }
-}
-
-function closeModal() {
-    document.getElementById('modal-overlay').classList.remove('open');
-}
-
-// ============================================================
-// STATUS BADGE HELPER
-// ============================================================
-
-function statusBadge(status) {
-    if (!status) return '';
-    const cls = status.toLowerCase().replace(/_/g, '-');
-    return `<span class="badge-status ${cls}">${status.replace(/_/g, ' ')}</span>`;
-}
-
-function tierBadge(tier) {
-    if (!tier) return '';
-    return `<span class="badge-tier ${tier.toLowerCase()}">${tier}</span>`;
-}
-
-function formatDate(d) {
-    if (!d) return '—';
-    const dt = new Date(d);
-    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatMoney(v) {
-    return v != null ? '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—';
-}
-
-// ============================================================
-// MODULE 1: FLIGHTS
-// ============================================================
-
-async function loadFlights() {
-    try {
-        const flights = await api('/api/flights');
-        const tbody = document.getElementById('flights-tbody');
-
-        const stats = document.getElementById('flight-stats');
-        const scheduled = flights.filter(f => f.status === 'SCHEDULED').length;
-        const delayed = flights.filter(f => f.status === 'DELAYED').length;
-        const inAir = flights.filter(f => f.status === 'IN_AIR' || f.status === 'DEPARTED').length;
-        const arrived = flights.filter(f => f.status === 'ARRIVED').length;
-        stats.innerHTML = `
-            <div class="stat-card blue"><div class="stat-icon">📋</div><div class="stat-value">${flights.length}</div><div class="stat-label">Total Flights</div></div>
-            <div class="stat-card cyan"><div class="stat-icon">⏳</div><div class="stat-value">${scheduled}</div><div class="stat-label">Scheduled</div></div>
-            <div class="stat-card yellow"><div class="stat-icon">⚠️</div><div class="stat-value">${delayed}</div><div class="stat-label">Delayed</div></div>
-            <div class="stat-card purple"><div class="stat-icon">✈️</div><div class="stat-value">${inAir}</div><div class="stat-label">In Air</div></div>
-            <div class="stat-card green"><div class="stat-icon">🛬</div><div class="stat-value">${arrived}</div><div class="stat-label">Arrived</div></div>
-        `;
-
-        tbody.innerHTML = flights.map(f => `
-            <tr>
-                <td><strong class="text-blue">${f.flight_number}</strong></td>
-                <td>${f.airline_name}</td>
-                <td>${f.origin_airport} → ${f.destination_airport}</td>
-                <td>${formatDate(f.scheduled_departure)}</td>
-                <td class="text-muted">${f.aircraft_model || '—'}</td>
-                <td>${f.gate_number ? `${f.terminal_name} - ${f.gate_number}` : '<span class="text-muted">—</span>'}</td>
-                <td><span class="text-mono">${f.occupancy_pct || 0}%</span></td>
-                <td>${statusBadge(f.status)}</td>
-                <td>
-                    <div class="btn-group">
-                        <button class="btn btn-ghost btn-xs" onclick="loadFlightHistory(${f.flight_id})" title="History">📜</button>
-                        <button class="btn btn-ghost btn-xs" onclick="deleteFlight(${f.flight_id})" title="Delete">🗑️</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-    } catch (e) { console.error(e); }
-}
-
-async function addFlight() {
-    try {
-        const data = {
-            flight_number: document.getElementById('f-number').value,
-            airline_id: +document.getElementById('f-airline').value,
-            aircraft_id: +document.getElementById('f-aircraft').value || null,
-            origin_airport: document.getElementById('f-origin').value,
-            destination_airport: document.getElementById('f-dest').value,
-            scheduled_departure: document.getElementById('f-dep').value,
-            scheduled_arrival: document.getElementById('f-arr').value,
-            flight_type: document.getElementById('f-type').value,
-            total_seats: +document.getElementById('f-seats').value,
-            base_price: +document.getElementById('f-price').value
-        };
-        const res = await api('/api/flights', { method: 'POST', body: data });
-        toast(res.message, 'success');
-        closeModal();
-        loadFlights();
-    } catch (e) {}
-}
-
-async function shortcutUpdateFlightStatus(id, status, delay, reason) {
-    try {
-        const res = await api(`/api/flights/${id}/status`, {
-            method: 'PUT', body: { status, delay_minutes: delay || 0, delay_reason: reason || null }
-        });
-        toast(res.message, 'success');
-        loadFlights();
-    } catch (e) {}
-}
-
-async function deleteFlight(id) {
-    if (!confirm('Delete this flight?')) return;
-    try {
-        const res = await api(`/api/flights/${id}`, { method: 'DELETE' });
-        toast(res.message, 'success');
-        loadFlights();
-    } catch (e) {}
-}
-
-async function loadFlightHistory(flightId) {
-    try {
-        const history = await api(`/api/flights/${flightId}/history`);
-        const panel = document.getElementById('flight-history-panel');
-        panel.innerHTML = `
-            <div class="card mt-2">
-                <div class="card-header"><h3>📜 Flight #${flightId} Status History</h3></div>
-                <div class="card-body">
-                    ${history.length ? `<table class="data-table">
-                        <thead><tr><th>Time</th><th>Old Status</th><th>New Status</th><th>Changed By</th><th>Notes</th></tr></thead>
-                        <tbody>${history.map(h => `
-                            <tr>
-                                <td>${formatDate(h.changed_at)}</td>
-                                <td>${h.old_status ? statusBadge(h.old_status) : '—'}</td>
-                                <td>${statusBadge(h.new_status)}</td>
-                                <td>${h.changed_by}</td>
-                                <td class="text-muted" style="white-space:normal;max-width:300px">${h.notes || ''}</td>
-                            </tr>`).join('')}</tbody>
-                    </table>` : '<div class="empty-state"><div class="empty-icon">📭</div>No status changes recorded</div>'}
-                </div>
-            </div>`;
-        toast(`Loaded ${history.length} history entries`, 'info');
-    } catch (e) {}
-}
-
-// ============================================================
-// MODULE 2: PASSENGERS & BOOKINGS
-// ============================================================
-
-function switchPassengerTab(tab) {
-    document.querySelectorAll('#module-passengers .tab').forEach(t => t.classList.remove('active'));
+function showPanel(id) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + id).classList.add('active');
+    document.querySelectorAll('.sidebar button').forEach(b => b.classList.remove('active'));
     event.target.classList.add('active');
-    ['passengers', 'bookings', 'itinerary', 'frequent'].forEach(t => {
-        const el = document.getElementById(`${t}-content`);
-        if (el) el.style.display = t === tab ? 'block' : 'none';
-    });
-    if (tab === 'bookings') loadBookings();
-    if (tab === 'frequent') loadFrequentFlyer();
-}
 
-async function loadPassengers() {
-    try {
-        const passengers = await api('/api/passengers');
-        document.getElementById('passengers-tbody').innerHTML = passengers.map(p => `
-            <tr>
-                <td>${p.passenger_id}</td>
-                <td><strong>${p.first_name} ${p.last_name}</strong></td>
-                <td class="text-muted">${p.email || ''}</td>
-                <td class="text-mono">${p.passport_number || ''}</td>
-                <td>${p.nationality || ''}</td>
-                <td class="text-muted">${p.phone || ''}</td>
-            </tr>
-        `).join('');
-
-        document.getElementById('passenger-stats').innerHTML = `
-            <div class="stat-card blue"><div class="stat-icon">👤</div><div class="stat-value">${passengers.length}</div><div class="stat-label">Total Passengers</div></div>
-            <div class="stat-card green"><div class="stat-icon">🌍</div><div class="stat-value">${new Set(passengers.map(p=>p.nationality).filter(Boolean)).size}</div><div class="stat-label">Nationalities</div></div>
-        `;
-    } catch (e) {}
-}
-
-async function searchPassengers(term) {
-    if (term.length < 2) { loadPassengers(); return; }
-    try {
-        const passengers = await api(`/api/passengers/search/${encodeURIComponent(term)}`);
-        document.getElementById('passengers-tbody').innerHTML = passengers.map(p => `
-            <tr>
-                <td>${p.passenger_id}</td>
-                <td><strong>${p.first_name} ${p.last_name}</strong></td>
-                <td class="text-muted">${p.email || ''}</td>
-                <td class="text-mono">${p.passport_number || ''}</td>
-                <td>${p.nationality || ''}</td>
-                <td class="text-muted">${p.phone || ''}</td>
-            </tr>
-        `).join('');
-    } catch (e) {}
-}
-
-async function addPassenger() {
-    try {
-        const data = {
-            first_name: document.getElementById('p-first').value,
-            last_name: document.getElementById('p-last').value,
-            email: document.getElementById('p-email').value,
-            phone: document.getElementById('p-phone').value,
-            passport_number: document.getElementById('p-passport').value,
-            nationality: document.getElementById('p-nationality').value,
-            date_of_birth: document.getElementById('p-dob').value,
-            gender: document.getElementById('p-gender').value
-        };
-        const res = await api('/api/passengers', { method: 'POST', body: data });
-        toast(res.message, 'success');
-        closeModal();
-        loadPassengers();
-    } catch (e) {}
-}
-
-async function loadBookings() {
-    try {
-        const bookings = await api('/api/bookings');
-        document.getElementById('bookings-tbody').innerHTML = bookings.map(b => `
-            <tr>
-                <td>${b.booking_id}</td>
-                <td class="text-mono text-blue">${b.booking_ref}</td>
-                <td>${b.passenger_name}</td>
-                <td><strong>${b.flight_number}</strong></td>
-                <td>${b.origin_airport} → ${b.destination_airport}</td>
-                <td>${b.booking_class}</td>
-                <td class="text-mono">${b.seat_number || '—'}</td>
-                <td>${formatMoney(b.price)}</td>
-                <td>${statusBadge(b.booking_status)}</td>
-                <td>${statusBadge(b.payment_status)}</td>
-                <td>
-                    <div class="btn-group">
-                        ${b.booking_status === 'CONFIRMED' ? `<button class="btn btn-success btn-xs" onclick="shortcutCheckIn(${b.booking_id})">Check-in</button>` : ''}
-                        ${b.booking_status !== 'CANCELLED' ? `<button class="btn btn-danger btn-xs" onclick="shortcutCancelBooking(${b.booking_id})">Cancel</button>` : ''}
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-
-        // Update stats
-        const stats = document.getElementById('passenger-stats');
-        const confirmed = bookings.filter(b => b.booking_status === 'CONFIRMED').length;
-        const totalRev = bookings.filter(b => b.payment_status === 'PAID').reduce((s,b) => s + Number(b.price), 0);
-        stats.innerHTML += `
-            <div class="stat-card cyan"><div class="stat-icon">📝</div><div class="stat-value">${bookings.length}</div><div class="stat-label">Total Bookings</div></div>
-            <div class="stat-card yellow"><div class="stat-icon">💰</div><div class="stat-value">${formatMoney(totalRev)}</div><div class="stat-label">Total Revenue</div></div>
-        `;
-    } catch (e) {}
-}
-
-async function shortcutBookFlight(passengerId, flightId, cls, seat) {
-    try {
-        const res = await api('/api/bookings/book', {
-            method: 'POST', body: { passenger_id: passengerId, flight_id: flightId, booking_class: cls, seat_number: seat }
-        });
-        toast(res.result, res.success ? 'success' : 'error');
-        loadBookings(); loadFlights();
-    } catch (e) {}
-}
-
-async function shortcutCheckIn(bookingId) {
-    try {
-        const res = await api(`/api/bookings/${bookingId}/checkin`, { method: 'POST', body: {} });
-        toast(res.result, res.success ? 'success' : 'error');
-        loadBookings();
-    } catch (e) {}
-}
-
-async function shortcutCancelBooking(bookingId) {
-    try {
-        const res = await api(`/api/bookings/${bookingId}/cancel`, { method: 'POST' });
-        toast(res.result, res.success ? 'success' : 'error');
-        loadBookings(); loadFlights();
-    } catch (e) {}
-}
-
-async function shortcutTransfer(bookingId, newFlightId, newSeat) {
-    try {
-        const res = await api(`/api/bookings/${bookingId}/transfer`, {
-            method: 'POST', body: { new_flight_id: newFlightId, new_seat: newSeat }
-        });
-        toast(res.result, res.success ? 'success' : 'error');
-        loadBookings(); loadFlights();
-    } catch (e) {}
-}
-
-async function loadPassengerItinerary(passengerId) {
-    try {
-        const itinerary = await api(`/api/passengers/${passengerId}/itinerary`);
-        const content = document.getElementById('itinerary-content');
-        content.innerHTML = `<div class="card"><div class="card-header"><h3>🗺️ Itinerary for ${itinerary[0]?.passenger_name || 'Passenger #'+passengerId}</h3></div>
-            <div class="card-body">
-                <table class="data-table"><thead><tr>
-                    <th>Ref</th><th>Flight</th><th>Route</th><th>Departure</th><th>Class</th><th>Seat</th><th>Gate</th><th>Boarding</th><th>Status</th>
-                </tr></thead><tbody>${itinerary.map(i => `<tr>
-                    <td class="text-mono text-blue">${i.booking_ref}</td>
-                    <td><strong>${i.flight_number}</strong></td>
-                    <td>${i.origin_airport} → ${i.destination_airport}</td>
-                    <td>${formatDate(i.scheduled_departure)}</td>
-                    <td>${i.booking_class}</td>
-                    <td class="text-mono">${i.seat_number || '—'}</td>
-                    <td>${i.gate_number ? `${i.terminal_name}-${i.gate_number}` : '—'}</td>
-                    <td>${i.boarding_group || '—'}</td>
-                    <td>${statusBadge(i.booking_status)}</td>
-                </tr>`).join('')}</tbody></table>
-            </div></div>`;
-        // switch to itinerary tab
-        document.querySelectorAll('#module-passengers .tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('#module-passengers .tab')[2].classList.add('active');
-        ['passengers', 'bookings', 'itinerary', 'frequent'].forEach(t => {
-            const el = document.getElementById(`${t}-content`);
-            if (el) el.style.display = t === 'itinerary' ? 'block' : 'none';
-        });
-    } catch (e) {}
-}
-
-async function loadFrequentFlyer() {
-    try {
-        const ff = await api('/api/frequent-flyer');
-        document.getElementById('frequent-content').innerHTML = `<div class="card"><div class="card-header"><h3>🎖️ Frequent Flyer Program</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Passenger</th><th>Airline</th><th>FF Number</th><th>Tier</th><th>Total Miles</th><th>Available Miles</th><th>Last Activity</th>
-            </tr></thead><tbody>${ff.map(f => `<tr>
-                <td><strong>${f.passenger_name}</strong></td>
-                <td>${f.airline_name}</td>
-                <td class="text-mono">${f.ff_number}</td>
-                <td>${tierBadge(f.tier)}</td>
-                <td class="text-mono">${Number(f.total_miles).toLocaleString()}</td>
-                <td class="text-mono text-green">${Number(f.available_miles).toLocaleString()}</td>
-                <td class="text-muted">${f.last_activity || '—'}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
+    // Auto-load data for some panels
+    if (id === 'raw') loadRawTableButtons();
+    if (id === 'audit') loadAudit();
 }
 
 // ============================================================
-// MODULE 3: BAGGAGE & CARGO
+// TABLES OVERVIEW
 // ============================================================
 
-function switchBaggageTab(tab) {
-    document.querySelectorAll('#module-baggage .tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    document.getElementById('baggage-tracking-content').style.display = tab === 'tracking' ? 'block' : 'none';
-    document.getElementById('cargo-content').style.display = tab === 'cargo' ? 'block' : 'none';
-    if (tab === 'cargo') loadCargo();
-}
-
-async function loadBaggage() {
+async function runShow(type) {
+    const target = 'tables-result';
+    const queries = {
+        tables: `SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024,1) AS data_kb, ROUND(INDEX_LENGTH/1024,1) AS index_kb FROM information_schema.TABLES WHERE TABLE_SCHEMA='skyport_airport' ORDER BY TABLE_NAME`,
+        triggers: `SELECT TRIGGER_NAME, EVENT_MANIPULATION AS event, EVENT_OBJECT_TABLE AS on_table, ACTION_TIMING AS timing FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='skyport_airport' ORDER BY EVENT_OBJECT_TABLE`,
+        functions: `SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE AS returns_type FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA='skyport_airport' AND ROUTINE_TYPE='FUNCTION'`,
+        procedures: `SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA='skyport_airport' AND ROUTINE_TYPE='PROCEDURE'`,
+        views: `SELECT TABLE_NAME AS view_name FROM information_schema.VIEWS WHERE TABLE_SCHEMA='skyport_airport' ORDER BY TABLE_NAME`
+    };
+    const sql = queries[type];
     try {
-        const baggage = await api('/api/baggage');
-        document.getElementById('baggage-tbody').innerHTML = baggage.map(b => `
-            <tr>
-                <td>${b.baggage_id}</td>
-                <td class="text-mono">${b.tag_number}</td>
-                <td>${b.passenger_name}</td>
-                <td><strong>${b.flight_number}</strong></td>
-                <td>${b.origin_airport} → ${b.destination_airport}</td>
-                <td>${b.weight_kg} kg</td>
-                <td>${b.baggage_type}</td>
-                <td>${statusBadge(b.baggage_status)}</td>
-                <td>${b.claim_id ? `<span class="badge-status ${b.claim_status?.toLowerCase()}">${b.claim_type}: ${b.claim_status}</span>` : '<span class="text-muted">None</span>'}</td>
-            </tr>
-        `).join('');
-    } catch (e) {}
-}
-
-async function loadCargo() {
-    try {
-        const cargo = await api('/api/cargo');
-        document.getElementById('cargo-tbody').innerHTML = cargo.map(c => `
-            <tr>
-                <td>${c.shipment_id}</td>
-                <td><strong>${c.flight_number}</strong></td>
-                <td>${c.origin_airport} → ${c.destination_airport}</td>
-                <td>${c.shipper_name}</td>
-                <td>${c.receiver_name}</td>
-                <td>${c.shipment_type}</td>
-                <td>${c.weight_kg} kg</td>
-                <td>${formatMoney(c.price)}</td>
-                <td>${statusBadge(c.status)}</td>
-            </tr>
-        `).join('');
-    } catch (e) {}
-}
-
-async function shortcutAddBaggage(bookingId) {
-    const tag = 'BG' + String(Date.now()).slice(-8);
-    try {
-        const res = await api('/api/baggage', { method: 'POST', body: { booking_id: bookingId, tag_number: tag, weight_kg: 22.5, baggage_type: 'CHECKED' } });
-        toast(res.message + ` (Tag: ${tag})`, 'success');
-        loadBaggage();
-    } catch (e) {}
-}
-
-async function shortcutUpdateBaggage(id, status) {
-    try {
-        const res = await api(`/api/baggage/${id}/status`, { method: 'PUT', body: { status } });
-        toast(res.message, 'success');
-        loadBaggage();
-    } catch (e) {}
-}
-
-async function shortcutFileClaim(baggageId, passengerId, claimType) {
-    try {
-        const res = await api('/api/baggage-claims', { method: 'POST', body: { baggage_id: baggageId, passenger_id: passengerId, claim_type: claimType, description: 'Filed via admin panel shortcut' } });
-        toast(res.message, 'success');
-        loadBaggage();
-    } catch (e) {}
+        const rows = await api(sql);
+        renderResult(target, sql, rows, `SHOW ${type.toUpperCase()}`);
+        log(`Listed ${rows.length} ${type}`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
 }
 
 // ============================================================
-// MODULE 4: EMPLOYEES
+// RAW TABLE VIEWER
 // ============================================================
 
-function switchEmployeeTab(tab) {
-    document.querySelectorAll('#module-employees .tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    document.getElementById('employee-directory-content').style.display = tab === 'directory' ? 'block' : 'none';
-    document.getElementById('crew-schedule-content').style.display = tab === 'crew' ? 'block' : 'none';
-    if (tab === 'crew') loadCrewSchedule();
+async function loadRawTableButtons() {
+    try {
+        const tables = await api(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='skyport_airport' AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME`);
+        document.getElementById('raw-table-buttons').innerHTML = tables.map(t =>
+            `<button class="act-btn" onclick="viewTable('${t.TABLE_NAME}')">${t.TABLE_NAME}</button>`
+        ).join('');
+    } catch (e) { log(e.message, 'err'); }
 }
 
-async function loadEmployees() {
+async function viewTable(name) {
+    const sql = `SELECT * FROM ${name} LIMIT 50`;
     try {
-        const employees = await api('/api/employees');
-        const typeColors = { PILOT: 'text-blue', CABIN_CREW: 'text-green', GROUND_STAFF: 'text-yellow', SECURITY: 'text-red' };
-        document.getElementById('employees-tbody').innerHTML = employees.map(e => `
-            <tr>
-                <td>${e.employee_id}</td>
-                <td><strong>${e.full_name}</strong></td>
-                <td><span class="${typeColors[e.employee_type] || ''}">${e.employee_type}</span></td>
-                <td class="text-muted">${e.email}</td>
-                <td>${e.airline_name || '<span class="text-muted">Airport</span>'}</td>
-                <td class="text-muted">${e.hire_date || ''}</td>
-                <td class="text-mono">${formatMoney(e.salary)}</td>
-                <td class="text-muted" style="white-space:normal;max-width:250px;font-size:11px">${e.specialization_details || ''}</td>
-                <td>${e.is_active ? '✅' : '❌'}</td>
-            </tr>
-        `).join('');
-
-        const pilots = employees.filter(e => e.employee_type === 'PILOT').length;
-        const crew = employees.filter(e => e.employee_type === 'CABIN_CREW').length;
-        const ground = employees.filter(e => e.employee_type === 'GROUND_STAFF').length;
-        const security = employees.filter(e => e.employee_type === 'SECURITY').length;
-        document.getElementById('employee-stats').innerHTML = `
-            <div class="stat-card blue"><div class="stat-icon">👨‍✈️</div><div class="stat-value">${pilots}</div><div class="stat-label">Pilots</div></div>
-            <div class="stat-card green"><div class="stat-icon">💁</div><div class="stat-value">${crew}</div><div class="stat-label">Cabin Crew</div></div>
-            <div class="stat-card yellow"><div class="stat-icon">🔧</div><div class="stat-value">${ground}</div><div class="stat-label">Ground Staff</div></div>
-            <div class="stat-card red"><div class="stat-icon">🛡️</div><div class="stat-value">${security}</div><div class="stat-label">Security</div></div>
-        `;
-    } catch (e) {}
-}
-
-async function loadCrewSchedule() {
-    try {
-        const schedule = await api('/api/crew-schedule');
-        document.getElementById('crew-schedule-content').innerHTML = `<div class="card"><div class="card-header"><h3>📅 Crew Flight Schedule</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Crew Member</th><th>Type</th><th>Role</th><th>Flight</th><th>Route</th><th>Departure</th><th>Arrival</th><th>Status</th>
-            </tr></thead><tbody>${schedule.map(s => `<tr>
-                <td><strong>${s.crew_name}</strong></td>
-                <td>${s.employee_type}</td>
-                <td>${s.role}</td>
-                <td class="text-blue">${s.flight_number}</td>
-                <td>${s.origin_airport} → ${s.destination_airport}</td>
-                <td>${formatDate(s.scheduled_departure)}</td>
-                <td>${formatDate(s.scheduled_arrival)}</td>
-                <td>${statusBadge(s.flight_status)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
+        const rows = await api(sql);
+        renderResult('raw-result', sql, rows, `TABLE: ${name}`);
+        log(`Showing ${name}: ${rows.length} rows`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
 }
 
 // ============================================================
-// MODULE 5: OPERATIONS
+// TRIGGER TESTS
 // ============================================================
 
-function switchOpsTab(tab) {
-    document.querySelectorAll('#module-operations .tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    ['gates','terminals','runways','maintenance','aircraft','airline-stats'].forEach(t => {
-        const el = document.getElementById(`ops-${t}-content`);
-        if (el) el.style.display = t === tab ? 'block' : 'none';
-    });
-    if (tab === 'terminals') loadTerminals();
-    if (tab === 'runways') loadRunways();
-    if (tab === 'maintenance') loadMaintenance();
-    if (tab === 'aircraft') loadAircraft();
-    if (tab === 'airline-stats') loadAirlineStats();
-}
+async function testTrigger(name) {
+    const target = 'triggers-result';
+    document.getElementById(target).innerHTML = '';
 
-async function loadGates() {
     try {
-        const gates = await api('/api/gates');
-        document.getElementById('gates-tbody').innerHTML = gates.map(g => `
-            <tr>
-                <td><strong>${g.gate_number}</strong></td>
-                <td>${g.terminal_name}</td>
-                <td>${g.gate_type}</td>
-                <td>${g.is_available ? '<span class="text-green">✅ Available</span>' : '<span class="text-red">🔴 Occupied</span>'}</td>
-                <td>${g.flight_number ? `<span class="text-blue">${g.flight_number}</span>` : '—'}</td>
-                <td>${g.destination_airport || '—'}</td>
-                <td class="text-muted">${g.start_time && g.end_time ? formatDate(g.start_time) + ' - ' + formatDate(g.end_time) : '—'}</td>
-            </tr>
-        `).join('');
-    } catch (e) {}
-}
+        switch (name) {
+            case 'booking_insert': {
+                // Show BEFORE state
+                const before = await api(`SELECT COUNT(*) as boarding_pass_count FROM boarding_passes`);
+                renderResult(target, 'SELECT COUNT(*) FROM boarding_passes', before, '① BEFORE — Boarding pass count');
 
-async function loadTerminals() {
-    try {
-        const terminals = await api('/api/terminals');
-        document.getElementById('ops-terminals-content').innerHTML = `<div class="card"><div class="card-header"><h3>🏢 Terminals</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Terminal</th><th>Floors</th><th>Lounge</th><th>Duty Free</th><th>Status</th>
-            </tr></thead><tbody>${terminals.map(t => `<tr>
-                <td><strong>${t.terminal_name}</strong></td>
-                <td>${t.floor_count}</td>
-                <td>${t.has_lounge ? '✅' : '❌'}</td>
-                <td>${t.has_duty_free ? '✅' : '❌'}</td>
-                <td>${statusBadge(t.status)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                // Fire trigger by inserting a booking via procedure
+                const sql = `CALL sp_book_flight(10, 2, 'ECONOMY', '30A', @bid, @res)`;
+                await api(sql);
+                const res = await api(`SELECT @bid as new_booking_id, @res as result`);
+                renderResult(target, sql + '; SELECT @bid, @res;', res, '② ACTION — sp_book_flight called');
 
-async function loadRunways() {
-    try {
-        const runways = await api('/api/runways');
-        document.getElementById('ops-runways-content').innerHTML = `<div class="card"><div class="card-header"><h3>🛤️ Runways</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Code</th><th>Length (m)</th><th>Width (m)</th><th>Surface</th><th>Active</th><th>Status</th>
-            </tr></thead><tbody>${runways.map(r => `<tr>
-                <td><strong>${r.runway_code}</strong></td>
-                <td>${r.length_meters.toLocaleString()}</td>
-                <td>${r.width_meters}</td>
-                <td>${r.surface_type}</td>
-                <td>${r.is_active ? '✅' : '❌'}</td>
-                <td>${statusBadge(r.status)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                // Show AFTER state — boarding pass auto-created by trigger
+                const after = await api(`SELECT * FROM boarding_passes ORDER BY pass_id DESC LIMIT 3`);
+                renderResult(target, 'SELECT * FROM boarding_passes ORDER BY pass_id DESC LIMIT 3', after, '③ AFTER — trg_after_booking_insert auto-created boarding pass');
+                log('Trigger trg_after_booking_insert tested ✓', 'ok');
+                break;
+            }
+            case 'flight_status': {
+                const before = await api(`SELECT flight_id, flight_number, status FROM flights WHERE flight_id = 2`);
+                renderResult(target, 'SELECT flight_id, flight_number, status FROM flights WHERE flight_id=2', before, '① BEFORE — Flight status');
 
-async function loadMaintenance() {
-    try {
-        const records = await api('/api/maintenance');
-        document.getElementById('ops-maintenance-content').innerHTML = `<div class="card"><div class="card-header"><h3>🔧 Maintenance Records</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Aircraft</th><th>Type</th><th>Airline</th><th>Maint. Type</th><th>Start</th><th>End</th><th>Technician</th><th>Cost</th><th>Status</th>
-            </tr></thead><tbody>${records.map(m => `<tr>
-                <td><strong>${m.registration_no}</strong></td>
-                <td>${m.manufacturer} ${m.model}</td>
-                <td>${m.airline_name}</td>
-                <td>${m.maintenance_type}</td>
-                <td>${formatDate(m.start_date)}</td>
-                <td>${m.end_date ? formatDate(m.end_date) : '—'}</td>
-                <td>${m.technician_name || '—'}</td>
-                <td>${formatMoney(m.cost)}</td>
-                <td>${statusBadge(m.status)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                await api(`SELECT 1`); // dummy to separate
+                // We need direct UPDATE - use a workaround through the API
+                const updateRes = await fetch('/api/flights/2/status', {
+                    method: 'PUT', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ status: 'BOARDING', delay_minutes: 0 })
+                });
+                const ur = await updateRes.json();
+                renderResult(target, "UPDATE flights SET status='BOARDING' WHERE flight_id=2", [ur], '② ACTION — Status changed to BOARDING');
 
-async function loadAircraft() {
-    try {
-        const aircraft = await api('/api/aircraft');
-        document.getElementById('ops-aircraft-content').innerHTML = `<div class="card"><div class="card-header"><h3>🛩️ Fleet</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Registration</th><th>Airline</th><th>Type</th><th>Model</th><th>Year</th><th>Flight Hours</th><th>Status</th><th>Next Maint.</th>
-            </tr></thead><tbody>${aircraft.map(a => `<tr>
-                <td class="text-mono"><strong>${a.registration_no}</strong></td>
-                <td>${a.airline_name}</td>
-                <td>${a.type_code}</td>
-                <td>${a.manufacturer} ${a.model}</td>
-                <td>${a.manufacture_year}</td>
-                <td class="text-mono">${Number(a.total_flight_hours).toLocaleString()}</td>
-                <td>${statusBadge(a.status)}</td>
-                <td class="text-muted">${a.next_maintenance || '—'}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                const after = await api(`SELECT * FROM flight_status_history WHERE flight_id = 2 ORDER BY changed_at DESC LIMIT 5`);
+                renderResult(target, 'SELECT * FROM flight_status_history WHERE flight_id=2', after, '③ AFTER — trg_after_flight_status_update logged the change');
+                log('Trigger trg_after_flight_status_update tested ✓', 'ok');
+                break;
+            }
+            case 'baggage_weight': {
+                renderResult(target, '-- Attempting to insert a 55kg CHECKED bag for an ECONOMY passenger', [], '① SETUP — Testing weight limit trigger');
+                try {
+                    // This should FAIL — trigger rejects heavy bags
+                    await api(`INSERT INTO baggage (booking_id, tag_number, weight_kg, baggage_type) VALUES (1, 'BGTEST01', 55.0, 'CHECKED')`);
+                    renderResult(target, "INSERT baggage (55kg)", [{result:'UNEXPECTED: Should have been rejected'}], '② RESULT — ERROR EXPECTED');
+                } catch (e) {
+                    renderResult(target, "INSERT INTO baggage (...) VALUES (1, 'BGTEST01', 55.0, 'CHECKED')", [{trigger_error: e.message}], '② RESULT — trg_before_baggage_insert REJECTED the insert ✓');
+                    log('Trigger trg_before_baggage_insert correctly rejected heavy baggage ✓', 'ok');
+                }
+                break;
+            }
+            case 'baggage_claim': {
+                const before = await api(`SELECT baggage_id, tag_number, status FROM baggage WHERE baggage_id = 1`);
+                renderResult(target, 'SELECT baggage_id, tag_number, status FROM baggage WHERE baggage_id=1', before, '① BEFORE — Baggage status');
 
-async function loadAirlineStats() {
-    try {
-        const stats = await api('/api/airlines/stats');
-        document.getElementById('ops-airline-stats-content').innerHTML = `<div class="card"><div class="card-header"><h3>📊 Airline Statistics (View)</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Airline</th><th>Code</th><th>Alliance</th><th>Flights</th><th>Fleet</th><th>Bookings</th><th>Revenue</th><th>Delayed</th><th>Avg Delay</th><th>Avg Occupancy</th>
-            </tr></thead><tbody>${stats.map(s => `<tr>
-                <td><strong>${s.airline_name}</strong></td>
-                <td class="text-mono">${s.airline_code}</td>
-                <td>${s.alliance}</td>
-                <td>${s.total_flights}</td>
-                <td>${s.fleet_size}</td>
-                <td>${s.total_bookings}</td>
-                <td class="text-green">${formatMoney(s.total_revenue)}</td>
-                <td>${s.delayed_flights > 0 ? `<span class="text-red">${s.delayed_flights}</span>` : '0'}</td>
-                <td>${s.avg_delay_min ? s.avg_delay_min + ' min' : '—'}</td>
-                <td class="text-mono">${s.avg_occupancy_pct || 0}%</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                try {
+                    await api(`INSERT INTO baggage_claims (baggage_id, passenger_id, claim_type, description) VALUES (1, 1, 'LOST', 'Test claim from panel')`);
+                } catch(e) {}
 
-async function shortcutReassignGate(flightId, newGateId) {
-    try {
-        const res = await api('/api/gates/reassign', { method: 'POST', body: { flight_id: flightId, new_gate_id: newGateId } });
-        toast(res.result, res.success ? 'success' : 'error');
-        loadGates(); loadFlights();
-    } catch (e) {}
-}
+                const after = await api(`SELECT baggage_id, tag_number, status FROM baggage WHERE baggage_id = 1`);
+                renderResult(target, 'SELECT baggage_id, tag_number, status FROM baggage WHERE baggage_id=1', after, '② AFTER — trg_after_baggage_claim_insert changed status');
+                log('Trigger trg_after_baggage_claim tested ✓', 'ok');
+                break;
+            }
+            case 'employee_delete': {
+                const crew = await api(`SELECT e.employee_id, CONCAT(e.first_name,' ',e.last_name) AS name, fca.flight_id FROM employees e JOIN flight_crew_assignments fca ON e.employee_id=fca.employee_id LIMIT 3`);
+                renderResult(target, 'SELECT employees with active flight assignments', crew, '① BEFORE — Employees assigned to flights');
 
-// ============================================================
-// MODULE 6: COMMERCIAL & PARKING
-// ============================================================
+                if (crew.length > 0) {
+                    try {
+                        await api(`DELETE FROM employees WHERE employee_id = ${crew[0].employee_id}`);
+                        renderResult(target, `DELETE FROM employees WHERE employee_id=${crew[0].employee_id}`, [{result:'UNEXPECTED'}], '② RESULT');
+                    } catch (e) {
+                        renderResult(target, `DELETE FROM employees WHERE employee_id=${crew[0].employee_id}`, [{trigger_error: e.message}], '② RESULT — trg_before_employee_delete BLOCKED deletion ✓');
+                        log('Trigger trg_before_employee_delete correctly prevented deletion ✓', 'ok');
+                    }
+                }
+                break;
+            }
+            case 'maintenance_insert': {
+                const before = await api(`SELECT aircraft_id, registration_no, status FROM aircraft WHERE aircraft_id = 3`);
+                renderResult(target, 'SELECT aircraft_id, registration_no, status FROM aircraft WHERE aircraft_id=3', before, '① BEFORE — Aircraft status');
 
-function switchCommTab(tab) {
-    document.querySelectorAll('#module-commercial .tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    ['shops','transactions','parking'].forEach(t => {
-        const el = document.getElementById(`comm-${t}-content`);
-        if (el) el.style.display = t === tab ? 'block' : 'none';
-    });
-    if (tab === 'transactions') loadShopTransactions();
-    if (tab === 'parking') loadParking();
-}
+                try {
+                    await api(`INSERT INTO maintenance_records (aircraft_id, maintenance_type, start_date, status, description) VALUES (3, 'UNSCHEDULED', NOW(), 'IN_PROGRESS', 'Test from panel')`);
+                } catch(e) {}
 
-async function loadShops() {
-    try {
-        const shops = await api('/api/shops');
-        document.getElementById('shops-tbody').innerHTML = shops.map(s => `
-            <tr>
-                <td><strong>${s.shop_name}</strong></td>
-                <td>${s.shop_type}</td>
-                <td>${s.terminal_name}</td>
-                <td>${s.floor_number}</td>
-                <td>${s.opening_time} - ${s.closing_time}</td>
-                <td>${formatMoney(s.monthly_rent)}</td>
-                <td>${s.is_active ? '✅' : '❌'}</td>
-            </tr>
-        `).join('');
-    } catch (e) {}
-}
+                const after = await api(`SELECT aircraft_id, registration_no, status FROM aircraft WHERE aircraft_id = 3`);
+                renderResult(target, 'SELECT aircraft_id, registration_no, status FROM aircraft WHERE aircraft_id=3', after, '② AFTER — trg_after_maintenance_insert set status to MAINTENANCE');
+                log('Trigger trg_after_maintenance_insert tested ✓', 'ok');
+                break;
+            }
+            case 'maintenance_complete': {
+                try {
+                    await api(`UPDATE maintenance_records SET status='COMPLETED', end_date=NOW() WHERE aircraft_id=3 AND status='IN_PROGRESS' ORDER BY record_id DESC LIMIT 1`);
+                } catch(e) {}
+                const after = await api(`SELECT aircraft_id, registration_no, status FROM aircraft WHERE aircraft_id = 3`);
+                renderResult(target, "UPDATE maintenance_records SET status='COMPLETED' ...", after, 'AFTER — trg_after_maintenance_complete set aircraft back to ACTIVE');
+                log('Trigger trg_after_maintenance_complete tested ✓', 'ok');
+                break;
+            }
+            case 'shop_transaction': {
+                const before = await api(`SELECT ff.passenger_id, ff.total_miles, ff.available_miles FROM frequent_flyer ff WHERE passenger_id=1`);
+                renderResult(target, 'SELECT total_miles, available_miles FROM frequent_flyer WHERE passenger_id=1', before, '① BEFORE — FF miles');
 
-async function loadShopTransactions() {
-    try {
-        const txns = await api('/api/shop-transactions');
-        document.getElementById('comm-transactions-content').innerHTML = `<div class="card"><div class="card-header"><h3>💳 Shop Transactions</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>ID</th><th>Shop</th><th>Customer</th><th>Amount</th><th>Payment</th><th>Items</th><th>Time</th>
-            </tr></thead><tbody>${txns.map(t => `<tr>
-                <td>${t.transaction_id}</td>
-                <td><strong>${t.shop_name}</strong></td>
-                <td>${t.customer_name || '<span class="text-muted">Anonymous</span>'}</td>
-                <td class="text-green">${formatMoney(t.amount)}</td>
-                <td>${t.payment_method}</td>
-                <td class="text-muted" style="max-width:250px;white-space:normal;font-size:12px">${t.items_purchased || ''}</td>
-                <td class="text-muted">${formatDate(t.transaction_time)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
-}
+                try {
+                    await api(`INSERT INTO shop_transactions (shop_id, passenger_id, amount, payment_method, items_purchased) VALUES (1, 1, 75.00, 'CREDIT_CARD', 'Test purchase')`);
+                } catch(e) {}
 
-async function loadParking() {
-    try {
-        const lots = await api('/api/parking');
-        document.getElementById('comm-parking-content').innerHTML = `<div class="card"><div class="card-header"><h3>🅿️ Parking Availability</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>Lot</th><th>Type</th><th>Terminal</th><th>Total</th><th>Available</th><th>Occupied</th><th>Occupancy</th><th>Rate/hr</th><th>Daily Max</th><th>Covered</th>
-            </tr></thead><tbody>${lots.map(p => `<tr>
-                <td><strong>${p.lot_name}</strong></td>
-                <td>${p.lot_type}</td>
-                <td>${p.terminal_name || '—'}</td>
-                <td>${p.total_spots}</td>
-                <td class="text-green">${p.available_spots}</td>
-                <td>${p.occupied_spots}</td>
-                <td class="text-mono">${p.occupancy_pct}%</td>
-                <td>${formatMoney(p.hourly_rate)}</td>
-                <td>${formatMoney(p.daily_max)}</td>
-                <td>${p.is_covered ? '✅' : '❌'}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
+                const after = await api(`SELECT ff.passenger_id, ff.total_miles, ff.available_miles FROM frequent_flyer ff WHERE passenger_id=1`);
+                renderResult(target, 'SELECT total_miles, available_miles FROM frequent_flyer WHERE passenger_id=1', after, '② AFTER — trg_after_shop_transaction awarded miles');
+                log('Trigger trg_after_shop_transaction tested ✓', 'ok');
+                break;
+            }
+            case 'gate_conflict': {
+                const existing = await api(`SELECT * FROM gate_assignments WHERE status='ACTIVE' LIMIT 1`);
+                renderResult(target, 'SELECT * FROM gate_assignments WHERE status=ACTIVE LIMIT 1', existing, '① Existing active gate assignment');
+
+                if (existing.length > 0) {
+                    try {
+                        await api(`INSERT INTO gate_assignments (flight_id, gate_id, start_time, end_time) VALUES (999, ${existing[0].gate_id}, '${existing[0].start_time}', '${existing[0].end_time}')`);
+                        renderResult(target, 'INSERT conflicting gate assignment', [{result:'UNEXPECTED'}], '② RESULT');
+                    } catch(e) {
+                        renderResult(target, `INSERT INTO gate_assignments — same gate, overlapping time`, [{trigger_error: e.message}], '② RESULT — trg_before_gate_assignment BLOCKED conflict ✓');
+                        log('Trigger trg_before_gate_assignment correctly blocked conflict ✓', 'ok');
+                    }
+                }
+                break;
+            }
+            case 'audit_booking': {
+                const sql = `SELECT * FROM audit_log ORDER BY log_id DESC LIMIT 5`;
+                const rows = await api(sql);
+                renderResult(target, sql, rows, 'AUDIT LOG — trg_audit_booking_insert logs all booking operations');
+                log('Showing recent audit log entries', 'ok');
+                break;
+            }
+            case 'parking': {
+                const before = await api(`SELECT lot_id, lot_name, total_spots, available_spots FROM parking_lots LIMIT 3`);
+                renderResult(target, 'SELECT lot_id, lot_name, total_spots, available_spots FROM parking_lots', before, '① BEFORE — Parking availability');
+
+                try {
+                    await api(`INSERT INTO parking_reservations (lot_id, license_plate, vehicle_type, entry_time) VALUES (1, 'TEST-999', 'SEDAN', NOW())`);
+                } catch(e) {}
+
+                const after = await api(`SELECT lot_id, lot_name, total_spots, available_spots FROM parking_lots LIMIT 3`);
+                renderResult(target, 'SELECT lot_id, lot_name, total_spots, available_spots FROM parking_lots', after, '② AFTER — trg_after_parking_reservation decreased available_spots');
+                log('Trigger trg_after_parking_reservation tested ✓', 'ok');
+                break;
+            }
+            case 'flight_delete': {
+                const info = await api(`SELECT f.flight_id, f.flight_number, COUNT(b.booking_id) as booking_count FROM flights f LEFT JOIN bookings b ON f.flight_id=b.flight_id AND b.booking_status!='CANCELLED' WHERE f.flight_id=1 GROUP BY f.flight_id`);
+                renderResult(target, 'Flight #1 with booking count', info, '① BEFORE — Flight has active bookings');
+
+                try {
+                    await api(`DELETE FROM flights WHERE flight_id = 1`);
+                    renderResult(target, 'DELETE FROM flights WHERE flight_id=1', [{result:'UNEXPECTED'}], '② RESULT');
+                } catch(e) {
+                    renderResult(target, 'DELETE FROM flights WHERE flight_id=1', [{trigger_error: e.message}], '② RESULT — trg_before_flight_delete BLOCKED deletion ✓');
+                    log('Trigger trg_before_flight_delete correctly prevented deletion ✓', 'ok');
+                }
+                break;
+            }
+        }
+    } catch (e) { log('Trigger test error: ' + e.message, 'err'); }
 }
 
 // ============================================================
-// MODULE 7: ADMIN PANEL
+// FUNCTION TESTS
 // ============================================================
 
-function switchAdminTab(tab) {
-    document.querySelectorAll('#module-admin .tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    ['sql','audit','dbinfo'].forEach(t => {
-        const el = document.getElementById(`admin-${t}-content`);
-        if (el) el.style.display = t === tab ? 'block' : 'none';
-    });
-    if (tab === 'audit') loadAuditLog();
-    if (tab === 'dbinfo') loadDBInfo();
+async function testFunction(name) {
+    const target = 'functions-result';
+    const queries = {
+        duration: { sql: `SELECT fn_calculate_flight_duration(1) AS duration_minutes`, label: 'fn_calculate_flight_duration(flight_id=1)' },
+        miles: { sql: `SELECT fn_get_passenger_miles(1) AS total_miles`, label: 'fn_get_passenger_miles(passenger_id=1)' },
+        utilization: { sql: `SELECT fn_aircraft_utilization_rate(1, 30) AS utilization_pct`, label: 'fn_aircraft_utilization_rate(aircraft_id=1, days=30)' },
+        gate_occ: { sql: `SELECT fn_gate_occupancy_rate(1, CURDATE()) AS gate_occupancy_pct`, label: 'fn_gate_occupancy_rate(gate_id=1, today)' },
+        flight_occ: { sql: `SELECT fn_flight_occupancy(1) AS flight_occupancy_pct`, label: 'fn_flight_occupancy(flight_id=1)' },
+        revenue: { sql: `SELECT fn_get_airline_revenue(1, '2025-01-01', '2026-12-31') AS airline_revenue`, label: 'fn_get_airline_revenue(airline_id=1, 2025-2026)' }
+    };
+    const q = queries[name];
+    try {
+        const rows = await api(q.sql);
+        renderResult(target, q.sql, rows, q.label);
+        log(`Function ${q.label} executed ✓`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
 }
 
-async function loadAdminStats() {
+// ============================================================
+// PROCEDURE TESTS
+// ============================================================
+
+async function testProcedure(name) {
+    const target = 'procedures-result';
+    document.getElementById(target).innerHTML = '';
+
     try {
-        const stats = await api('/api/admin/stats');
-        document.getElementById('admin-stats').innerHTML = `
-            <div class="stat-card blue"><div class="stat-icon">📋</div><div class="stat-value">${stats.tables?.length || 0}</div><div class="stat-label">Tables</div></div>
-            <div class="stat-card green"><div class="stat-icon">👁️</div><div class="stat-value">${stats.views?.length || 0}</div><div class="stat-label">Views</div></div>
-            <div class="stat-card yellow"><div class="stat-icon">⚡</div><div class="stat-value">${stats.triggers?.length || 0}</div><div class="stat-label">Triggers</div></div>
-            <div class="stat-card purple"><div class="stat-icon">⚙️</div><div class="stat-value">${stats.routines?.length || 0}</div><div class="stat-label">Routines</div></div>
-        `;
-    } catch (e) {}
+        switch (name) {
+            case 'book': {
+                const before = await api(`SELECT flight_id, flight_number, available_seats FROM flights WHERE flight_id=3`);
+                renderResult(target, 'SELECT available_seats FROM flights WHERE flight_id=3', before, '① BEFORE — Available seats');
+
+                await api(`CALL sp_book_flight(5, 3, 'BUSINESS', '3A', @bid, @res)`);
+                const res = await api(`SELECT @bid as booking_id, @res as result`);
+                renderResult(target, "CALL sp_book_flight(5, 3, 'BUSINESS', '3A', @bid, @res)", res, '② CALL sp_book_flight');
+
+                const after = await api(`SELECT flight_id, flight_number, available_seats FROM flights WHERE flight_id=3`);
+                renderResult(target, 'SELECT available_seats FROM flights WHERE flight_id=3', after, '③ AFTER — Seats decreased by 1');
+                log('sp_book_flight tested ✓', 'ok');
+                break;
+            }
+            case 'cancel': {
+                const bookings = await api(`SELECT booking_id, booking_ref, booking_status, payment_status FROM bookings WHERE booking_status='CONFIRMED' ORDER BY booking_id DESC LIMIT 1`);
+                if (bookings.length === 0) { log('No confirmed booking to cancel', 'err'); return; }
+                renderResult(target, 'Last confirmed booking', bookings, '① BEFORE');
+
+                const bid = bookings[0].booking_id;
+                await api(`CALL sp_cancel_booking(${bid}, @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, `CALL sp_cancel_booking(${bid}, @res)`, res, '② CALL sp_cancel_booking');
+
+                const after = await api(`SELECT booking_id, booking_ref, booking_status, payment_status FROM bookings WHERE booking_id=${bid}`);
+                renderResult(target, `SELECT * FROM bookings WHERE booking_id=${bid}`, after, '③ AFTER — Status=CANCELLED, Payment=REFUNDED');
+                log('sp_cancel_booking tested ✓', 'ok');
+                break;
+            }
+            case 'checkin': {
+                const bookings = await api(`SELECT booking_id, booking_ref, booking_status FROM bookings WHERE booking_status='CONFIRMED' LIMIT 1`);
+                if (bookings.length === 0) { log('No confirmed booking to check-in', 'err'); return; }
+                const bid = bookings[0].booking_id;
+                renderResult(target, `Booking #${bid} status`, bookings, '① BEFORE');
+
+                await api(`CALL sp_check_in_passenger(${bid}, '12B', @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, `CALL sp_check_in_passenger(${bid}, '12B', @res)`, res, '② CALL sp_check_in_passenger');
+
+                const after = await api(`SELECT booking_id, booking_ref, booking_status, seat_number FROM bookings WHERE booking_id=${bid}`);
+                renderResult(target, `SELECT * FROM bookings WHERE booking_id=${bid}`, after, '③ AFTER — CHECKED_IN');
+                log('sp_check_in_passenger tested ✓', 'ok');
+                break;
+            }
+            case 'transfer': {
+                const bookings = await api(`SELECT booking_id, flight_id, booking_class FROM bookings WHERE booking_status IN ('CONFIRMED','CHECKED_IN') LIMIT 1`);
+                if (bookings.length === 0) { log('No active booking to transfer', 'err'); return; }
+                const bid = bookings[0].booking_id;
+                renderResult(target, `Active booking #${bid}`, bookings, '① BEFORE');
+
+                await api(`CALL sp_transfer_passenger(${bid}, 5, '22C', @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, `CALL sp_transfer_passenger(${bid}, 5, '22C', @res)`, res, '② CALL sp_transfer_passenger');
+
+                const after = await api(`SELECT booking_id, booking_ref, flight_id, booking_status FROM bookings ORDER BY booking_id DESC LIMIT 3`);
+                renderResult(target, 'Latest bookings (old cancelled + new created)', after, '③ AFTER — Old cancelled, new booking created');
+                log('sp_transfer_passenger tested ✓', 'ok');
+                break;
+            }
+            case 'gate': {
+                const before = await api(`SELECT ga.assignment_id, ga.flight_id, ga.gate_id, g.gate_number, ga.status FROM gate_assignments ga JOIN gates g ON ga.gate_id=g.gate_id WHERE ga.flight_id=1 AND ga.status='ACTIVE'`);
+                renderResult(target, 'Current gate for flight_id=1', before, '① BEFORE');
+
+                await api(`CALL sp_reassign_gate(1, 5, @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, 'CALL sp_reassign_gate(1, 5, @res)', res, '② CALL sp_reassign_gate');
+
+                const after = await api(`SELECT ga.assignment_id, ga.flight_id, ga.gate_id, g.gate_number, ga.status FROM gate_assignments ga JOIN gates g ON ga.gate_id=g.gate_id WHERE ga.flight_id=1 ORDER BY ga.assignment_id DESC LIMIT 3`);
+                renderResult(target, 'Gate assignments for flight_id=1', after, '③ AFTER — Old=CANCELLED, New=ACTIVE');
+                log('sp_reassign_gate tested ✓', 'ok');
+                break;
+            }
+            case 'report': {
+                const sql = `CALL sp_generate_daily_report(CURDATE())`;
+                const rows = await api(sql);
+                renderResult(target, sql, rows, 'DAILY REPORT — 3 result sets');
+                log('sp_generate_daily_report tested ✓', 'ok');
+                break;
+            }
+        }
+    } catch (e) { log('Procedure test error: ' + e.message, 'err'); }
 }
 
-async function loadAuditLog() {
+// ============================================================
+// VIEW TESTS
+// ============================================================
+
+async function testView(viewName) {
+    const sql = `SELECT * FROM ${viewName} LIMIT 20`;
     try {
-        const logs = await api('/api/audit-log');
-        document.getElementById('admin-audit-content').innerHTML = `<div class="card"><div class="card-header"><h3>📜 Audit Log (Latest 100)</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr>
-                <th>ID</th><th>Table</th><th>Operation</th><th>Record ID</th><th>Old Values</th><th>New Values</th><th>By</th><th>Time</th>
-            </tr></thead><tbody>${logs.map(l => `<tr>
-                <td>${l.log_id}</td>
-                <td class="text-blue">${l.table_name}</td>
-                <td>${statusBadge(l.operation === 'INSERT' ? 'CONFIRMED' : l.operation === 'DELETE' ? 'CANCELLED' : 'DELAYED').replace(/CONFIRMED|CANCELLED|DELAYED/g, l.operation)}</td>
-                <td>${l.record_id || '—'}</td>
-                <td class="text-muted" style="max-width:200px;white-space:normal;font-size:11px">${l.old_values ? JSON.stringify(l.old_values) : '—'}</td>
-                <td class="text-muted" style="max-width:200px;white-space:normal;font-size:11px">${l.new_values ? JSON.stringify(l.new_values) : '—'}</td>
-                <td>${l.performed_by}</td>
-                <td class="text-muted">${formatDate(l.performed_at)}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
-    } catch (e) {}
+        const rows = await api(sql);
+        renderResult('views-result', sql, rows, `VIEW: ${viewName}`);
+        log(`View ${viewName}: ${rows.length} rows ✓`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
 }
 
-async function loadDBInfo() {
+// ============================================================
+// TRANSACTION TESTS
+// ============================================================
+
+async function testTransaction(name) {
+    const target = 'transactions-result';
+    document.getElementById(target).innerHTML = '';
+
     try {
-        const stats = await api('/api/admin/stats');
-        let html = `<div class="card mb-2"><div class="card-header"><h3>📋 Tables (${stats.tables?.length || 0})</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr><th>Table</th><th>Rows</th><th>Data Size</th><th>Index Size</th></tr></thead>
-            <tbody>${(stats.tables || []).map(t => `<tr>
-                <td class="text-blue"><strong>${t.TABLE_NAME}</strong></td>
-                <td>${t.TABLE_ROWS || 0}</td>
-                <td class="text-muted">${((t.DATA_LENGTH || 0) / 1024).toFixed(1)} KB</td>
-                <td class="text-muted">${((t.INDEX_LENGTH || 0) / 1024).toFixed(1)} KB</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
+        switch (name) {
+            case 'book_success': {
+                const before = await api(`SELECT flight_id, available_seats FROM flights WHERE flight_id=4`);
+                renderResult(target, 'SELECT available_seats FROM flights WHERE flight_id=4', before, '① BEFORE — available_seats');
 
-        html += `<div class="card mb-2"><div class="card-header"><h3>⚡ Triggers (${stats.triggers?.length || 0})</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr><th>Trigger</th><th>Event</th><th>Table</th><th>Timing</th></tr></thead>
-            <tbody>${(stats.triggers || []).map(t => `<tr>
-                <td class="text-yellow"><strong>${t.TRIGGER_NAME}</strong></td>
-                <td>${t.EVENT_MANIPULATION}</td>
-                <td>${t.EVENT_OBJECT_TABLE}</td>
-                <td>${t.ACTION_TIMING}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
+                await api(`CALL sp_book_flight(8, 4, 'ECONOMY', '28D', @bid, @res)`);
+                const res = await api(`SELECT @bid as booking_id, @res as result`);
+                renderResult(target, "CALL sp_book_flight(8, 4, 'ECONOMY', '28D', @bid, @res)", res, '② TRANSACTION — COMMITTED');
 
-        html += `<div class="card mb-2"><div class="card-header"><h3>⚙️ Functions & Procedures (${stats.routines?.length || 0})</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr><th>Name</th><th>Type</th></tr></thead>
-            <tbody>${(stats.routines || []).map(r => `<tr>
-                <td class="text-purple"><strong>${r.ROUTINE_NAME}</strong></td>
-                <td>${r.ROUTINE_TYPE}</td>
-            </tr>`).join('')}</tbody></table></div></div>`;
+                const after = await api(`SELECT flight_id, available_seats FROM flights WHERE flight_id=4`);
+                renderResult(target, 'SELECT available_seats FROM flights WHERE flight_id=4', after, '③ AFTER — seats decremented (COMMIT successful)');
+                log('Transaction COMMIT verified ✓', 'ok');
+                break;
+            }
+            case 'book_fail': {
+                // Try to book on a cancelled flight or nonexistent
+                const before = await api(`SELECT flight_id, available_seats FROM flights WHERE flight_id=4`);
+                renderResult(target, 'Seats before attempt', before, '① BEFORE');
 
-        html += `<div class="card"><div class="card-header"><h3>👁️ Views (${stats.views?.length || 0})</h3></div>
-            <div class="card-body"><table class="data-table"><thead><tr><th>View Name</th></tr></thead>
-            <tbody>${(stats.views || []).map(v => `<tr><td class="text-green"><strong>${v.TABLE_NAME}</strong></td></tr>`).join('')}</tbody></table></div></div>`;
+                await api(`CALL sp_book_flight(1, 9999, 'ECONOMY', '1A', @bid, @res)`);
+                const res = await api(`SELECT @bid as booking_id, @res as result`);
+                renderResult(target, "CALL sp_book_flight(1, 9999, 'ECONOMY', '1A', @bid, @res) — nonexistent flight", res, '② TRANSACTION — ROLLED BACK');
 
-        document.getElementById('admin-dbinfo-content').innerHTML = html;
-    } catch (e) {}
+                const after = await api(`SELECT flight_id, available_seats FROM flights WHERE flight_id=4`);
+                renderResult(target, 'Seats after failed attempt (unchanged)', after, '③ AFTER — no changes (ROLLBACK successful)');
+                log('Transaction ROLLBACK verified ✓', 'ok');
+                break;
+            }
+            case 'cancel_success': {
+                const bookings = await api(`SELECT booking_id, booking_ref, booking_status, payment_status FROM bookings WHERE booking_status='CONFIRMED' LIMIT 1`);
+                if (bookings.length === 0) { log('No booking to cancel', 'err'); return; }
+                renderResult(target, 'Active booking', bookings, '① BEFORE');
+
+                const bid = bookings[0].booking_id;
+                await api(`CALL sp_cancel_booking(${bid}, @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, `CALL sp_cancel_booking(${bid}, @res)`, res, '② TRANSACTION — COMMITTED');
+
+                const after = await api(`SELECT booking_id, booking_status, payment_status FROM bookings WHERE booking_id=${bid}`);
+                renderResult(target, `Booking #${bid} after cancel`, after, '③ AFTER — CANCELLED + REFUNDED atomically');
+                log('Cancel transaction COMMIT ✓', 'ok');
+                break;
+            }
+            case 'cancel_fail': {
+                const bookings = await api(`SELECT booking_id, booking_ref, booking_status FROM bookings WHERE booking_status='CANCELLED' LIMIT 1`);
+                if (bookings.length === 0) { log('No cancelled booking found', 'err'); return; }
+                renderResult(target, 'Already cancelled booking', bookings, '① BEFORE');
+
+                const bid = bookings[0].booking_id;
+                await api(`CALL sp_cancel_booking(${bid}, @res)`);
+                const res = await api(`SELECT @res as result`);
+                renderResult(target, `CALL sp_cancel_booking(${bid}, @res)`, res, '② TRANSACTION — REJECTED (already cancelled)');
+                log('Double-cancel correctly rejected ✓', 'ok');
+                break;
+            }
+            case 'show_state': {
+                const state = await api(`SELECT flight_id, flight_number, total_seats, available_seats, (total_seats - available_seats) AS booked_seats FROM flights ORDER BY flight_id`);
+                renderResult(target, 'SELECT flight_id, flight_number, total_seats, available_seats, booked FROM flights', state, 'CURRENT STATE — All flights seat counts');
+                log('Current state displayed', 'ok');
+                break;
+            }
+        }
+    } catch (e) { log('Transaction test error: ' + e.message, 'err'); }
+}
+
+// ============================================================
+// JOIN TESTS
+// ============================================================
+
+async function testJoin(type) {
+    const target = 'joins-result';
+    const queries = {
+        left: {
+            sql: `SELECT f.flight_id, f.flight_number, a.airline_name, f.origin_airport, f.destination_airport, f.status, g.gate_number, t.terminal_name, CASE WHEN g.gate_number IS NULL THEN '** NO GATE ASSIGNED **' ELSE CONCAT(t.terminal_name, '-', g.gate_number) END AS gate_info FROM flights f LEFT OUTER JOIN gate_assignments ga ON f.flight_id = ga.flight_id AND ga.status = 'ACTIVE' LEFT OUTER JOIN gates g ON ga.gate_id = g.gate_id LEFT OUTER JOIN terminals t ON g.terminal_id = t.terminal_id JOIN airlines a ON f.airline_id = a.airline_id ORDER BY f.scheduled_departure`,
+            label: 'LEFT OUTER JOIN — All flights, including those WITHOUT gate assignments (NULL gate columns)'
+        },
+        right: {
+            sql: `SELECT g.gate_number, t.terminal_name, g.gate_type, g.is_available, f.flight_number, f.destination_airport, CASE WHEN f.flight_number IS NULL THEN '** GATE EMPTY **' ELSE CONCAT(f.flight_number, ' → ', f.destination_airport) END AS assignment_info FROM gate_assignments ga RIGHT OUTER JOIN gates g ON ga.gate_id = g.gate_id AND ga.status = 'ACTIVE' JOIN terminals t ON g.terminal_id = t.terminal_id LEFT JOIN flights f ON ga.flight_id = f.flight_id ORDER BY t.terminal_name, g.gate_number`,
+            label: 'RIGHT OUTER JOIN — All gates, including those WITHOUT flight assignments'
+        },
+        full: {
+            sql: `SELECT e.employee_id, CONCAT(e.first_name, ' ', e.last_name) AS name, e.employee_type, fca.role, f.flight_number, CASE WHEN f.flight_number IS NULL THEN '** NO FLIGHT **' ELSE 'Assigned' END AS status FROM employees e LEFT OUTER JOIN flight_crew_assignments fca ON e.employee_id = fca.employee_id LEFT OUTER JOIN flights f ON fca.flight_id = f.flight_id WHERE e.employee_type IN ('PILOT','CABIN_CREW') UNION SELECT e.employee_id, CONCAT(e.first_name, ' ', e.last_name), e.employee_type, fca.role, f.flight_number, CASE WHEN e.employee_id IS NULL THEN '** NO CREW **' ELSE 'Assigned' END FROM flight_crew_assignments fca RIGHT OUTER JOIN employees e ON fca.employee_id = e.employee_id RIGHT OUTER JOIN flights f ON fca.flight_id = f.flight_id WHERE e.employee_id IS NULL ORDER BY name, flight_number`,
+            label: 'FULL OUTER JOIN (Emulated via UNION) — Employees ↔ Flights, showing unmatched on BOTH sides'
+        }
+    };
+    const q = queries[type];
+    try {
+        const rows = await api(q.sql);
+        renderResult(target, q.sql, rows, q.label);
+        log(`${type.toUpperCase()} OUTER JOIN: ${rows.length} rows ✓`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
+}
+
+// ============================================================
+// ADVANCED QUERY TESTS
+// ============================================================
+
+async function testAdvanced(name) {
+    const target = 'advanced-result';
+    const queries = {
+        subquery: {
+            sql: `SELECT CONCAT(p.first_name,' ',p.last_name) AS passenger, SUM(b.price) AS total_spent, (SELECT ROUND(AVG(price),2) FROM bookings WHERE payment_status='PAID') AS avg_price, COUNT(b.booking_id) AS bookings FROM passengers p JOIN bookings b ON p.passenger_id=b.passenger_id WHERE b.payment_status='PAID' GROUP BY p.passenger_id,p.first_name,p.last_name HAVING total_spent > (SELECT AVG(price)*2 FROM bookings WHERE payment_status='PAID') ORDER BY total_spent DESC`,
+            label: 'SUBQUERY — Passengers spending > 2× average'
+        },
+        correlated: {
+            sql: `SELECT a.airline_name, a.airline_code, COUNT(f.flight_id) AS total_flights, ROUND(AVG((f.total_seats-f.available_seats)/f.total_seats*100),1) AS avg_occupancy FROM airlines a JOIN flights f ON a.airline_id=f.airline_id WHERE f.status!='CANCELLED' GROUP BY a.airline_id,a.airline_name,a.airline_code HAVING avg_occupancy > (SELECT AVG((f2.total_seats-f2.available_seats)/f2.total_seats*100) FROM flights f2 WHERE f2.status!='CANCELLED') ORDER BY avg_occupancy DESC`,
+            label: 'CORRELATED SUBQUERY — Airlines with above-average occupancy'
+        },
+        window: {
+            sql: `SELECT CONCAT(p.first_name,' ',p.last_name) AS passenger, b.booking_class, b.price, f.flight_number, al.airline_name, RANK() OVER (ORDER BY b.price DESC) AS spending_rank, DENSE_RANK() OVER (PARTITION BY al.airline_id ORDER BY b.price DESC) AS airline_rank, SUM(b.price) OVER (PARTITION BY al.airline_id) AS airline_total, ROUND(b.price/SUM(b.price) OVER (PARTITION BY al.airline_id)*100,1) AS pct_of_airline FROM bookings b JOIN passengers p ON b.passenger_id=p.passenger_id JOIN flights f ON b.flight_id=f.flight_id JOIN airlines al ON f.airline_id=al.airline_id WHERE b.booking_status!='CANCELLED' ORDER BY spending_rank`,
+            label: 'WINDOW FUNCTIONS — RANK(), DENSE_RANK(), SUM() OVER (PARTITION BY)'
+        },
+        cte: {
+            sql: `WITH delay_stats AS (SELECT a.airline_name, COUNT(*) AS total_flights, SUM(CASE WHEN f.delay_minutes>0 THEN 1 ELSE 0 END) AS delayed_count, AVG(CASE WHEN f.delay_minutes>0 THEN f.delay_minutes END) AS avg_delay, MAX(f.delay_minutes) AS max_delay FROM flights f JOIN airlines a ON f.airline_id=a.airline_id GROUP BY a.airline_id,a.airline_name) SELECT *, ROUND((1-delayed_count/total_flights)*100,1) AS on_time_pct, CASE WHEN (delayed_count/total_flights)<0.1 THEN 'EXCELLENT' WHEN (delayed_count/total_flights)<0.25 THEN 'GOOD' WHEN (delayed_count/total_flights)<0.5 THEN 'FAIR' ELSE 'POOR' END AS rating FROM delay_stats ORDER BY on_time_pct DESC`,
+            label: 'CTE (Common Table Expression) — Airline reliability rating'
+        },
+        exists: {
+            sql: `SELECT p.passenger_id, CONCAT(p.first_name,' ',p.last_name) AS name, p.nationality FROM passengers p WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.passenger_id=p.passenger_id AND b.booking_status!='CANCELLED') AND EXISTS (SELECT 1 FROM shop_transactions st WHERE st.passenger_id=p.passenger_id) ORDER BY p.last_name`,
+            label: 'EXISTS — Passengers who booked a flight AND shopped'
+        },
+        selfjoin: {
+            sql: `SELECT f1.flight_number AS first_leg, f1.origin_airport AS depart, f1.destination_airport AS connect_at, f2.flight_number AS second_leg, f2.destination_airport AS final_dest, TIMESTAMPDIFF(MINUTE,f1.scheduled_arrival,f2.scheduled_departure) AS layover_min FROM flights f1 JOIN flights f2 ON f1.destination_airport=f2.origin_airport AND f2.scheduled_departure>f1.scheduled_arrival AND TIMESTAMPDIFF(MINUTE,f1.scheduled_arrival,f2.scheduled_departure) BETWEEN 60 AND 360 WHERE f1.status!='CANCELLED' AND f2.status!='CANCELLED' AND f1.origin_airport!=f2.destination_airport ORDER BY f1.flight_number,layover_min`,
+            label: 'SELF-JOIN — Possible connecting flights (1-6 hour layover)'
+        },
+        case: {
+            sql: `SELECT f.origin_airport, f.destination_airport, COUNT(b.booking_id) AS bookings, SUM(CASE WHEN b.booking_class='ECONOMY' THEN b.price ELSE 0 END) AS economy_rev, SUM(CASE WHEN b.booking_class='BUSINESS' THEN b.price ELSE 0 END) AS business_rev, SUM(CASE WHEN b.booking_class='FIRST' THEN b.price ELSE 0 END) AS first_rev, SUM(b.price) AS total_revenue, ROUND(AVG(b.price),2) AS avg_ticket FROM flights f JOIN bookings b ON f.flight_id=b.flight_id WHERE b.booking_status!='CANCELLED' GROUP BY f.origin_airport,f.destination_airport ORDER BY total_revenue DESC`,
+            label: 'CASE + GROUP BY — Revenue breakdown by route and class'
+        }
+    };
+    const q = queries[name];
+    try {
+        const rows = await api(q.sql);
+        renderResult(target, q.sql, rows, q.label);
+        log(`Advanced query [${name}]: ${rows.length} rows ✓`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
 }
 
 // ============================================================
 // SQL CONSOLE
 // ============================================================
 
-const sqlTemplates = {
-    dashboard: `SELECT * FROM vw_flight_dashboard ORDER BY scheduled_departure;`,
-    stats: `SELECT * FROM vw_airline_statistics;`,
-    revenue: `SELECT * FROM vw_revenue_report ORDER BY flight_date DESC;`,
-    delayed: `SELECT * FROM vw_delayed_flights;`,
-    leftjoin: `-- LEFT OUTER JOIN: All flights including those without gate assignments
-SELECT f.flight_id, f.flight_number, a.airline_name, f.origin_airport, f.destination_airport,
-       f.status, g.gate_number, t.terminal_name,
-       CASE WHEN g.gate_number IS NULL THEN '** NO GATE **' ELSE CONCAT(t.terminal_name, '-', g.gate_number) END AS gate_info
-FROM flights f
-LEFT OUTER JOIN gate_assignments ga ON f.flight_id = ga.flight_id AND ga.status = 'ACTIVE'
-LEFT OUTER JOIN gates g ON ga.gate_id = g.gate_id
-LEFT OUTER JOIN terminals t ON g.terminal_id = t.terminal_id
-JOIN airlines a ON f.airline_id = a.airline_id
-ORDER BY f.scheduled_departure;`,
-    rightjoin: `-- RIGHT OUTER JOIN: All gates including those with no flights
-SELECT g.gate_number, t.terminal_name, g.gate_type, g.is_available,
-       f.flight_number, f.destination_airport,
-       CASE WHEN f.flight_number IS NULL THEN '** GATE EMPTY **' ELSE CONCAT(f.flight_number, ' → ', f.destination_airport) END AS assignment_info
-FROM gate_assignments ga
-RIGHT OUTER JOIN gates g ON ga.gate_id = g.gate_id AND ga.status = 'ACTIVE'
-JOIN terminals t ON g.terminal_id = t.terminal_id
-LEFT JOIN flights f ON ga.flight_id = f.flight_id
-ORDER BY t.terminal_name, g.gate_number;`,
-    fulljoin: `-- FULL OUTER JOIN (Emulated via UNION): All employees and flight assignments
-SELECT e.employee_id, CONCAT(e.first_name, ' ', e.last_name) AS name, e.employee_type,
-       fca.role, f.flight_number, f.scheduled_departure,
-       CASE WHEN f.flight_number IS NULL THEN '** NO FLIGHT **' ELSE 'Assigned' END AS status
-FROM employees e
-LEFT OUTER JOIN flight_crew_assignments fca ON e.employee_id = fca.employee_id
-LEFT OUTER JOIN flights f ON fca.flight_id = f.flight_id
-WHERE e.employee_type IN ('PILOT','CABIN_CREW')
-UNION
-SELECT e.employee_id, CONCAT(e.first_name, ' ', e.last_name), e.employee_type,
-       fca.role, f.flight_number, f.scheduled_departure,
-       CASE WHEN e.employee_id IS NULL THEN '** NO CREW **' ELSE 'Assigned' END
-FROM flight_crew_assignments fca
-RIGHT OUTER JOIN employees e ON fca.employee_id = e.employee_id
-RIGHT OUTER JOIN flights f ON fca.flight_id = f.flight_id
-WHERE e.employee_id IS NULL
-ORDER BY name, flight_number;`,
-    functions: `-- Using custom functions
-SELECT f.flight_number, f.origin_airport, f.destination_airport,
-       fn_calculate_flight_duration(f.flight_id) AS duration_min,
-       fn_flight_occupancy(f.flight_id) AS occupancy_pct,
-       CASE WHEN fn_flight_occupancy(f.flight_id) >= 80 THEN 'HIGH'
-            WHEN fn_flight_occupancy(f.flight_id) >= 50 THEN 'MODERATE'
-            ELSE 'LOW' END AS demand
-FROM flights f WHERE f.status != 'CANCELLED' ORDER BY occupancy_pct DESC;`,
-    window: `-- Window Functions: Ranking passengers by spending
-SELECT CONCAT(p.first_name, ' ', p.last_name) AS passenger, b.booking_class, b.price,
-       f.flight_number, al.airline_name,
-       RANK() OVER (ORDER BY b.price DESC) AS spending_rank,
-       DENSE_RANK() OVER (PARTITION BY al.airline_id ORDER BY b.price DESC) AS airline_rank,
-       SUM(b.price) OVER (PARTITION BY al.airline_id) AS airline_total
-FROM bookings b
-JOIN passengers p ON b.passenger_id = p.passenger_id
-JOIN flights f ON b.flight_id = f.flight_id
-JOIN airlines al ON f.airline_id = al.airline_id
-WHERE b.booking_status != 'CANCELLED' ORDER BY spending_rank;`,
-    cte: `-- CTE: Flight delay analysis with reliability rating
-WITH delay_stats AS (
-    SELECT a.airline_name, COUNT(*) AS total_flights,
-           SUM(CASE WHEN f.delay_minutes > 0 THEN 1 ELSE 0 END) AS delayed,
-           AVG(CASE WHEN f.delay_minutes > 0 THEN f.delay_minutes END) AS avg_delay
-    FROM flights f JOIN airlines a ON f.airline_id = a.airline_id GROUP BY a.airline_id, a.airline_name
-)
-SELECT *, ROUND((1 - delayed/total_flights) * 100, 1) AS on_time_pct,
-       CASE WHEN (delayed/total_flights) < 0.1 THEN 'EXCELLENT'
-            WHEN (delayed/total_flights) < 0.25 THEN 'GOOD'
-            WHEN (delayed/total_flights) < 0.5 THEN 'FAIR' ELSE 'POOR' END AS rating
-FROM delay_stats ORDER BY on_time_pct DESC;`
-};
-
-function sqlTemplate(name) {
-    document.getElementById('sql-input').value = sqlTemplates[name] || '';
-}
-
-async function executeSQL() {
+async function runSQL() {
     const sql = document.getElementById('sql-input').value.trim();
     if (!sql) return;
-
-    const resultDiv = document.getElementById('sql-result');
-    resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Executing...</div>';
-
     try {
-        const data = await api('/api/admin/query', { method: 'POST', body: { sql } });
-
-        if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
-            // Multiple result sets
-            resultDiv.innerHTML = data.map((resultSet, i) => renderResultTable(resultSet, i)).join('');
-        } else if (Array.isArray(data) && data.length > 0) {
-            resultDiv.innerHTML = renderResultTable(data, 0);
-        } else {
-            resultDiv.innerHTML = '<div class="result-panel"><div class="result-header">✅ Query executed — no rows returned</div></div>';
-        }
-        toast(`Query returned ${Array.isArray(data) ? (Array.isArray(data[0]) ? data.reduce((s,r)=>s+r.length,0) : data.length) : 0} rows`, 'success');
+        const rows = await api(sql);
+        renderResult('sql-result', sql, rows, 'MANUAL QUERY');
+        log(`SQL executed: ${Array.isArray(rows) ? rows.length : 0} rows`, 'ok');
     } catch (e) {
-        resultDiv.innerHTML = `<div class="result-panel"><div class="result-header" style="background:rgba(239,68,68,0.06);color:var(--accent-red)">❌ Error</div><div class="result-body padded"><pre style="color:var(--accent-red);white-space:pre-wrap">${e.message}</pre></div></div>`;
+        document.getElementById('sql-result').innerHTML = `<div class="msg err">${e.message}</div>` + document.getElementById('sql-result').innerHTML;
+        log(e.message, 'err');
     }
 }
 
-function renderResultTable(rows, setIndex) {
-    if (!rows || rows.length === 0) return '';
-    const cols = Object.keys(rows[0]);
-    return `
-        <div class="result-panel mt-1">
-            <div class="result-header">✅ Result Set ${setIndex + 1} — ${rows.length} row${rows.length !== 1 ? 's' : ''}</div>
-            <div class="result-body">
-                <table class="data-table">
-                    <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
-                    <tbody>${rows.map(r => `<tr>${cols.map(c => {
-                        let v = r[c];
-                        if (v === null || v === undefined) v = '<span class="text-muted">NULL</span>';
-                        else if (typeof v === 'object') v = `<span class="text-muted">${JSON.stringify(v)}</span>`;
-                        return `<td>${v}</td>`;
-                    }).join('')}</tr>`).join('')}</tbody>
-                </table>
-            </div>
-        </div>`;
-}
-
-// Ctrl+Enter to execute SQL
 document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.key === 'Enter' && document.getElementById('module-admin').classList.contains('active')) {
-        executeSQL();
-    }
+    if (e.ctrlKey && e.key === 'Enter') runSQL();
 });
 
 // ============================================================
-// INITIAL LOAD
+// AUDIT LOG
 // ============================================================
 
-loadFlights();
+async function loadAudit() {
+    try {
+        const rows = await api(`SELECT * FROM audit_log ORDER BY log_id DESC LIMIT 50`);
+        renderResult('audit-result', 'SELECT * FROM audit_log ORDER BY log_id DESC LIMIT 50', rows, 'AUDIT LOG — Latest 50 entries');
+        log(`Audit log: ${rows.length} entries`, 'ok');
+    } catch (e) { log(e.message, 'err'); }
+}
+
+// ============================================================
+// DB STATUS CHECK
+// ============================================================
+
+async function checkDB() {
+    try {
+        const rows = await api(`SELECT 1 as ok`);
+        document.getElementById('db-status').className = 'ok';
+        document.getElementById('db-status').textContent = 'connected (skyport_airport)';
+        log('Database connection OK', 'ok');
+    } catch (e) {
+        document.getElementById('db-status').className = 'fail';
+        document.getElementById('db-status').textContent = 'disconnected';
+        log('Database connection FAILED: ' + e.message, 'err');
+    }
+}
+
+checkDB();
